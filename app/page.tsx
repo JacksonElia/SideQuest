@@ -29,8 +29,8 @@ interface QuestPlanResponse {
   error?: unknown;
 }
 
-interface QueryResponse {
-  chunks?: Array<{ text?: unknown; metadata?: { name?: unknown } }>;
+interface GuideAnswerResponse {
+  answer?: unknown;
   error?: unknown;
 }
 
@@ -245,25 +245,22 @@ export default function HomePage() {
     }
 
     try {
-      const response = await fetch("/api/query", {
+      const response = await fetch("/api/guide-answer", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lat: fix.latitude, lng: fix.longitude, utterance: text }),
+        body: JSON.stringify({ lat: fix.latitude, lng: fix.longitude, question: text }),
       });
-      const result = (await response.json()) as QueryResponse;
+      const result = (await response.json()) as GuideAnswerResponse;
       if (!response.ok) {
-        throw new Error(typeof result.error === "string" ? result.error : "Moss search failed.");
+        throw new Error(typeof result.error === "string" ? result.error : "Guide search failed.");
       }
-      const names = (result.chunks ?? [])
-        .map((chunk) => chunk.metadata?.name)
-        .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
       setMessages((current) => [
         ...current,
         textMessage(
           "assistant",
-          names.length
-            ? `Moss found: ${names.join(", ")}.`
-            : "Moss did not find a matching place nearby.",
+          typeof result.answer === "string" && result.answer.trim()
+            ? result.answer
+            : "I could not find an answer for that area question.",
         ),
       ]);
     } catch (error) {

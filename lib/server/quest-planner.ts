@@ -17,9 +17,7 @@
  * working query plan.
  */
 
-import { request as httpsRequest } from "node:https";
-
-import { loadLlmConfig } from "./llm/config.ts";
+import { completeOpenRouter } from "./openrouter.ts";
 import type { TravelProfile } from "@/types/message";
 
 export const QUEST_PLANNER_MODEL = "google/gemini-3.1-flash-lite-preview";
@@ -65,18 +63,14 @@ export interface QuestQueryPlan {
 }
 
 export type ParseQuestQueryPlanResult =
-  | { ok: true; value: QuestQueryPlan }
-  | { ok: false; error: string };
+  { ok: true; value: QuestQueryPlan } | { ok: false; error: string };
 
 export type GenerateQuestQueryPlanResult =
-  | { ok: true; value: QuestQueryPlan }
-  | { ok: false; error: string; status: number | null };
+  { ok: true; value: QuestQueryPlan } | { ok: false; error: string; status: number | null };
 
 /** The walking radius the profile implies, in minutes. */
 export function radiusMinutesForProfile(profile: TravelProfile): number {
-  return profile.activityLevel
-    ? RADIUS_MIN_BY_ACTIVITY[profile.activityLevel]
-    : DEFAULT_RADIUS_MIN;
+  return profile.activityLevel ? RADIUS_MIN_BY_ACTIVITY[profile.activityLevel] : DEFAULT_RADIUS_MIN;
 }
 
 /** Human-readable walking distance for the prompt, derived from the same radius. */
@@ -99,9 +93,7 @@ function discoveryPairs(profile: TravelProfile): { question: string; answer: str
     pairs.push({
       question: "How long will they be traveling, whether it's a few days or several weeks?",
       answer:
-        profile.durationDays <= 1
-          ? "Just a single day out"
-          : `About ${profile.durationDays} days`,
+        profile.durationDays <= 1 ? "Just a single day out" : `About ${profile.durationDays} days`,
     });
   }
 
@@ -211,17 +203,7 @@ export async function generateQuestQueryPlan(
   context: QuestLocationContext,
   profile: TravelProfile,
 ): Promise<GenerateQuestQueryPlanResult> {
-  const config = loadLlmConfig();
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${config.apiKey}`,
-    "Content-Type": "application/json",
-    "X-Title": config.appTitle,
-  };
-  if (config.httpReferer) {
-    headers["HTTP-Referer"] = config.httpReferer;
-  }
-
-  const requestBody = JSON.stringify({
+  const completion = await completeOpenRouter({
     model: QUEST_PLANNER_MODEL,
     messages: [
       {
@@ -232,36 +214,13 @@ export async function generateQuestQueryPlan(
       { role: "user", content: buildQuestQueryPrompt(context, profile) },
     ],
     temperature: 0.2,
-    max_tokens: 700,
-    response_format: { type: "json_object" },
+    maxTokens: 700,
+    responseFormat: { type: "json_object" },
+    label: "quest-plan",
   });
+  if (!completion.ok) return completion;
 
-  let response: OpenRouterResponse;
-  try {
-    response = await postOpenRouter(headers, requestBody, config.timeoutMs);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[quest-planner] OpenRouter request failed: ${message}`);
-    return { ok: false, error: "Quest planning request failed.", status: null };
-  }
-
-  if (response.status < 200 || response.status >= 300) {
-    const message = getOpenRouterError(response.body);
-    console.error(`[quest-planner] OpenRouter returned ${response.status}: ${message}`);
-    return {
-      ok: false,
-      error: "Quest planning is unavailable right now.",
-      status: response.status,
-    };
-  }
-
-  const completionText = getCompletionText(response.body);
-  if (!completionText) {
-    console.error("[quest-planner] OpenRouter response did not include completion text.");
-    return { ok: false, error: "Quest planning returned an invalid response.", status: 502 };
-  }
-
-  const parsed = parseQuestQueryPlan(completionText);
+  const parsed = parseQuestQueryPlan(completion.text);
   if (!parsed.ok) {
     console.error(`[quest-planner] Invalid model response: ${parsed.error}`);
     return { ok: false, error: parsed.error, status: 502 };
@@ -295,80 +254,4 @@ function parseQueryString(
   }
 
   return { ok: true, value: normalized };
-}
-
-function getOpenRouterError(responseBody: unknown): string {
-  if (!isRecord(responseBody)) {
-    return "Unknown error";
-  }
-
-  const { error } = responseBody;
-  if (typeof error === "string") {
-    return error;
-  }
-  if (isRecord(error) && typeof error.message === "string") {
-    return error.message;
-  }
-
-  return "Unknown error";
-}
-
-function getCompletionText(responseBody: unknown): string | null {
-  if (!isRecord(responseBody) || !Array.isArray(responseBody.choices)) {
-    return null;
-  }
-
-  const firstChoice = responseBody.choices[0];
-  if (!isRecord(firstChoice) || !isRecord(firstChoice.message)) {
-    return null;
-  }
-
-  return typeof firstChoice.message.content === "string" ? firstChoice.message.content : null;
-}
-
-interface OpenRouterResponse {
-  status: number;
-  body: unknown;
-}
-
-function postOpenRouter(
-  headers: Record<string, string>,
-  body: string,
-  timeoutMs: number,
-): Promise<OpenRouterResponse> {
-  return new Promise((resolve, reject) => {
-    const request = httpsRequest(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Length": Buffer.byteLength(body),
-        },
-      },
-      (response) => {
-        let responseText = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk: string) => {
-          responseText += chunk;
-        });
-        response.on("end", () => {
-          try {
-            resolve({
-              status: response.statusCode ?? 502,
-              body: JSON.parse(responseText),
-            });
-          } catch {
-            reject(new Error("OpenRouter returned a non-JSON response."));
-          }
-        });
-      },
-    );
-
-    request.setTimeout(timeoutMs, () => {
-      request.destroy(new Error("OpenRouter request timed out."));
-    });
-    request.on("error", reject);
-    request.end(body);
-  });
 }
