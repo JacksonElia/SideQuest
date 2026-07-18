@@ -13,13 +13,14 @@ import { VoiceButton } from "@/components/Voice/VoiceButton";
 import { useLocation } from "@/hooks/useLocation";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
 import type { QuestPlace } from "@/components/Plan/TravelPlanCard";
-import type { LocationCoordinates, Message, TravelProfile } from "@/types/message";
+import type { LocationCoordinates, Message, Quest, TravelProfile } from "@/types/message";
 
 type QuestScreen = "welcome" | "setup" | "scoping" | "main";
 
 interface QuestPlanResponse {
   queries?: unknown;
   places?: unknown;
+  quests?: unknown;
   error?: unknown;
 }
 
@@ -27,6 +28,7 @@ interface SavedJourney {
   questName: string;
   locationLabel: string;
   messages: Message[];
+  quests?: Quest[];
 }
 
 const JOURNEY_STORAGE_KEY = "sidequest-journey";
@@ -63,6 +65,33 @@ function toQuestPlaces(value: unknown): QuestPlace[] {
 
   return places;
 }
+
+/** Narrow the server's quest suggestions the same way places are narrowed. */
+function toQuests(value: unknown): Quest[] {
+  if (!Array.isArray(value)) return [];
+
+  const quests: Quest[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) continue;
+
+    const { name, description, stops } = entry as {
+      name?: unknown;
+      description?: unknown;
+      stops?: unknown;
+    };
+    if (typeof name !== "string" || !name.trim()) continue;
+
+    quests.push({
+      name: name.trim(),
+      description: typeof description === "string" ? description : "",
+      stops: Array.isArray(stops)
+        ? stops.filter((s): s is string => typeof s === "string" && !!s.trim())
+        : [],
+    });
+  }
+
+  return quests.slice(0, 3);
+}
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
 export default function HomePage() {
@@ -75,6 +104,8 @@ export default function HomePage() {
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
   /** Stops retrieved for the quest, once the guide has saved a profile. */
   const [questPlaces, setQuestPlaces] = useState<QuestPlace[]>([]);
+  /** Quest suggestions generated from the retrieved stops. */
+  const [quests, setQuests] = useState<Quest[]>([]);
   const [isLoadingPlaces, setIsLoadingPlaces] = useState(false);
   const [placesError, setPlacesError] = useState<string | null>(null);
 
@@ -111,11 +142,12 @@ export default function HomePage() {
         questName: nextQuestName,
         locationLabel: nextLocationLabel,
         messages: nextMessages,
+        quests,
       };
 
       window.localStorage.setItem(JOURNEY_STORAGE_KEY, JSON.stringify(savedJourney));
     },
-    [locationLabel, questName],
+    [locationLabel, questName, quests],
   );
 
   useEffect(() => {
@@ -199,6 +231,11 @@ export default function HomePage() {
         }
 
         setQuestPlaces(toQuestPlaces(body.places));
+        const nextQuests = toQuests(body.quests);
+        setQuests(nextQuests);
+        if (nextQuests[0]?.name) {
+          setQuestName(nextQuests[0].name);
+        }
       } catch {
         if (!cancelled) {
           setPlacesError("Could not reach the quest planner.");
@@ -222,6 +259,7 @@ export default function HomePage() {
     hasAdvancedRef.current = false;
     questPlanFetchedRef.current = false;
     setQuestPlaces([]);
+    setQuests([]);
     setPlacesError(null);
     setIsLoadingPlaces(false);
     setScreen("setup");
@@ -241,6 +279,9 @@ export default function HomePage() {
         if (Array.isArray(parsedJourney.messages)) {
           setRestoredMessages(parsedJourney.messages);
         }
+        if (Array.isArray(parsedJourney.quests)) {
+          setQuests(toQuests(parsedJourney.quests));
+        }
       } catch {
         setRestoredMessages([]);
       }
@@ -258,8 +299,18 @@ export default function HomePage() {
   }, [requestLocation]);
 
   const handleCreateQuest = () => {
-    setLocationLabel(locationLabel.trim() || "Current location");
+    const label = locationLabel.trim() || "Current location";
+    setLocationLabel(label);
     hasAdvancedRef.current = false;
+    // Best-effort: warm the ingestion pipeline while the traveler is scoping.
+    const fix = selectedLocation ?? location;
+    if (fix) {
+      void fetch("/api/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locationLabel: label, lat: fix.latitude, lng: fix.longitude }),
+      }).catch(() => {});
+    }
     setScreen("scoping");
   };
 
@@ -367,6 +418,7 @@ export default function HomePage() {
             locationLabel={locationLabel}
             profile={voice.profile}
             places={questPlaces}
+            quests={quests}
             isLoadingPlaces={isLoadingPlaces}
             placesError={placesError}
           />

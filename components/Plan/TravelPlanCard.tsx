@@ -1,7 +1,7 @@
 "use client";
 
 import { Compass, Footprints, MapPin, Route, ScrollText, Wallet } from "lucide-react";
-import type { TravelProfile } from "@/types/message";
+import type { Quest, TravelProfile } from "@/types/message";
 
 /** A stop retrieved for the quest, trimmed to what this card renders. */
 export interface QuestPlace {
@@ -16,6 +16,8 @@ interface TravelPlanCardProps {
   profile?: TravelProfile | null;
   /** Stops retrieved from the profile-driven quest plan. Empty until it lands. */
   places?: QuestPlace[];
+  /** Quest suggestions generated from the retrieved stops. Empty until they land. */
+  quests?: Quest[];
   isLoadingPlaces?: boolean;
   placesError?: string | null;
 }
@@ -42,6 +44,7 @@ export function TravelPlanCard({
   locationLabel,
   profile,
   places = [],
+  quests = [],
   isLoadingPlaces = false,
   placesError = null,
 }: TravelPlanCardProps) {
@@ -133,6 +136,28 @@ export function TravelPlanCard({
                 <span className="line-clamp-2 text-[10px] font-medium text-[#725452]">
                   {place.detail}
                 </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {/* Quest suggestions built from the stops above. */}
+      {quests.length > 0 ? (
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {quests.map((quest) => (
+            <li
+              key={quest.name}
+              className="rounded-lg border border-[#d5bd94] bg-[#fffaf0] px-2.5 py-1.5"
+            >
+              <p className="text-[11px] font-bold text-[#31101b]">{quest.name}</p>
+              {quest.description ? (
+                <p className="text-[10px] font-medium text-[#725452]">{quest.description}</p>
+              ) : null}
+              {quest.stops.length > 0 ? (
+                <p className="text-[10px] font-semibold text-[#9c3b43]">
+                  {quest.stops.join(" → ")}
+                </p>
               ) : null}
             </li>
           ))}

@@ -41,6 +41,13 @@ export type LocationPermissionStatus =
   | "error"
   | "unsupported";
 
+/** A generated quest: a named walk built from retrieved places. */
+export interface Quest {
+  name: string;
+  description: string;
+  stops: string[];
+}
+
 /** What the guide learned in planning mode, pushed from the agent over a text stream. */
 export interface TravelProfile {
   durationDays: number | null;

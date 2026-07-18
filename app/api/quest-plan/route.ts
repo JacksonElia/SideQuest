@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server";
 
 import { validateFix } from "@/lib/server/location";
+import { generateQuests } from "@/lib/server/quest-generator";
 import { generateQuestQueryPlan, radiusMinutesForProfile } from "@/lib/server/quest-planner";
 import { query } from "@/lib/server/query";
 import type { SearchResult } from "@/lib/server/store";
@@ -101,7 +102,29 @@ export async function POST(request: Request) {
   const places = dedupePlaces(results.flatMap((result) => result.chunks));
   const warnings = [...new Set(results.flatMap((result) => result.warnings))];
 
-  return NextResponse.json({ queries: plan.value.queries, places, warnings });
+  // Only places with a usable name can be arranged into quests: the model is
+  // told to copy stop names verbatim, so a nameless chunk has nothing to copy.
+  const questInputPlaces = places
+    .map((p) => ({
+      name: typeof p.metadata?.name === "string" ? p.metadata.name : "",
+      text: p.text,
+    }))
+    .filter((p) => p.name);
+  const quests = questInputPlaces.length
+    ? await generateQuests({
+        locationLabel: body.locationLabel.trim(),
+        profile: profile.value,
+        places: questInputPlaces,
+      })
+    : [];
+
+  // generateQuests fail-softs to []; surface that as a warning rather than an
+  // error so the traveler still gets their places.
+  if (places.length > 0 && quests.length === 0) {
+    warnings.push("Quest naming is unavailable right now.");
+  }
+
+  return NextResponse.json({ queries: plan.value.queries, places, quests, warnings });
 }
 
 /**
