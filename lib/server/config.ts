@@ -4,18 +4,18 @@
  *
  * Secrets are read here and never logged. `describeConfig()` exists so startup
  * logging has a safe thing to print.
- *
- * PORT is gone: on Next.js the framework owns the listener. Everything else is
- * carried over from the standalone server's config module unchanged.
  */
 
-export interface LiveKitConfig {
-  livekitUrl: string;
+export interface OpenAIConfig {
   apiKey: string;
-  apiSecret: string;
-  agentName: string;
-  agentId: string | null;
+  /** Realtime model id (e.g. `gpt-realtime` or `gpt-4o-realtime-preview`). */
+  model: string;
+  /** Voice id the Realtime session speaks with. */
+  voice: string;
 }
+
+const DEFAULT_MODEL = 'gpt-realtime';
+const DEFAULT_VOICE = 'alloy';
 
 /**
  * Read an env var, accepting a legacy/misspelled alias with a loud warning.
@@ -29,7 +29,7 @@ function readWithAlias(canonical: string, aliases: string[] = []): string | unde
     if (process.env[alias]) {
       console.warn(
         `[config] WARNING: using ${alias} as a fallback for ${canonical}. ` +
-          `Rename it in .env.local — the alias is not supported by the LiveKit SDK itself.`,
+          `Rename it in .env.local — the alias is not supported by the OpenAI SDK itself.`,
       );
       return process.env[alias];
     }
@@ -37,55 +37,32 @@ function readWithAlias(canonical: string, aliases: string[] = []): string | unde
   return undefined;
 }
 
-// Hackathon hardcoding: keep the voice path alive even when .env.local is
-// absent or partially filled. Real env always wins over these.
-const HARDCODED = {
-  livekitUrl: 'wss://karl-kgvkqw0n.livekit.cloud',
-  apiKey: 'APImtah35rTu6pi',
-  apiSecret: 'whixFSK3Z21zyfflKxCZe5OoWNl6sbghjHt7HGrOoAyA',
-  agentName: 'travel-guide',
-};
-
-export function loadConfig(): LiveKitConfig {
-  const cfg = {
-    // The SDK reads LIVEKIT_URL itself when a client is constructed bare, so the
-    // canonical name matters beyond our own code.
-    livekitUrl: readWithAlias('LIVEKIT_URL', ['LIVEKIT_WEBSOCKET_URL']) ?? HARDCODED.livekitUrl,
-    apiKey: readWithAlias('LIVEKIT_API_KEY', ['LIVEKEY_API_KEY']) ?? HARDCODED.apiKey,
-    apiSecret: process.env.LIVEKIT_API_SECRET || HARDCODED.apiSecret,
-    agentName: process.env.LIVEKIT_AGENT_NAME || HARDCODED.agentName,
-    agentId: process.env.LIVEKIT_AGENT_ID ?? null, // reference only; dispatch uses the name
+export function loadOpenAIConfig(): OpenAIConfig {
+  const cfg: OpenAIConfig = {
+    apiKey: process.env.OPENAI_API_KEY ?? '',
+    model: process.env.OPENAI_REALTIME_MODEL || DEFAULT_MODEL,
+    voice: process.env.OPENAI_REALTIME_VOICE || DEFAULT_VOICE,
   };
 
   const missing: string[] = [];
-  if (!cfg.livekitUrl) missing.push('LIVEKIT_URL');
-  if (!cfg.apiKey) missing.push('LIVEKIT_API_KEY');
-  if (!cfg.apiSecret) missing.push('LIVEKIT_API_SECRET');
-  if (!cfg.agentName) missing.push('LIVEKIT_AGENT_NAME');
+  if (!cfg.apiKey) missing.push('OPENAI_API_KEY');
 
   if (missing.length) {
     throw new Error(
       `Missing required environment variable(s): ${missing.join(', ')}.\n` +
-        `Copy .env.example to .env.local and fill them in. ` +
-        `LIVEKIT_API_SECRET is shown only once when the key is created in the LiveKit Cloud dashboard.`,
+        `Copy .env.example to .env.local and fill it in. ` +
+        `OPENAI_API_KEY is shown only once when the key is created in the OpenAI dashboard.`,
     );
   }
 
-  if (!/^wss?:\/\//.test(cfg.livekitUrl!)) {
-    throw new Error(
-      `LIVEKIT_URL must be a WebSocket URL starting with wss:// (got "${cfg.livekitUrl!.slice(0, 8)}...").`,
-    );
-  }
-
-  return cfg as LiveKitConfig;
+  return cfg;
 }
 
 /** Safe-to-log view of the config. Never includes the secret. */
-export function describeConfig(cfg: LiveKitConfig) {
+export function describeConfig(cfg: OpenAIConfig) {
   return {
-    livekitUrl: cfg.livekitUrl,
-    apiKey: `${cfg.apiKey.slice(0, 6)}…`, // key ID prefix only, enough to tell keys apart
-    apiSecret: '<set>',
-    agentName: cfg.agentName,
+    model: cfg.model,
+    voice: cfg.voice,
+    apiKey: `${cfg.apiKey.slice(0, 7)}…`,
   };
 }
