@@ -14,7 +14,11 @@ interface QuestPlanningProps {
   recorderStatus: RecorderStatus;
   durationSeconds: number;
   recorderError: string | null;
+  isGeneratingQuestPlan: boolean;
+  hasGeneratedQuestPlan: boolean;
+  questPlanError: string | null;
   onBack: () => void;
+  onGenerateQuestPlan: () => void;
   onStartQuest: () => void;
   onStartRecording: () => Promise<void>;
   onStopRecording: () => void;
@@ -28,7 +32,11 @@ export function QuestPlanning({
   recorderStatus,
   durationSeconds,
   recorderError,
+  isGeneratingQuestPlan,
+  hasGeneratedQuestPlan,
+  questPlanError,
   onBack,
+  onGenerateQuestPlan,
   onStartQuest,
   onStartRecording,
   onStopRecording,
@@ -103,8 +111,24 @@ export function QuestPlanning({
           </div>
           <button
             type="button"
+            onClick={onGenerateQuestPlan}
+            disabled={isGeneratingQuestPlan}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-[#f5d58a]/60 bg-[#531929] px-5 py-3 text-sm font-bold text-[#f5d58a] transition hover:bg-[#652033] active:translate-x-0.5 active:translate-y-0.5 disabled:cursor-wait disabled:opacity-70"
+          >
+            {isGeneratingQuestPlan ? "Generating quest plan..." : "Generate quest plan"}
+          </button>
+          {hasGeneratedQuestPlan && (
+            <p className="mt-3 text-center text-xs text-[#b9ddc8]">
+              Three Moss queries are ready in the console.
+            </p>
+          )}
+          {questPlanError && (
+            <p className="mt-3 text-center text-xs leading-5 text-[#f3b3a5]">{questPlanError}</p>
+          )}
+          <button
+            type="button"
             onClick={onStartQuest}
-            disabled={isTyping}
+            disabled={isTyping || isGeneratingQuestPlan || !hasGeneratedQuestPlan}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-[#f5d58a] bg-[#e5b85f] px-5 py-3.5 text-sm font-bold text-[#31101b] shadow-[4px_5px_0_rgba(18,5,9,0.35)] transition hover:bg-[#f0ca78] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:cursor-wait disabled:opacity-70"
           >
             Start Quest

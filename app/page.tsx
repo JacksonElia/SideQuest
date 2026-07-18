@@ -23,6 +23,11 @@ interface SavedJourney {
   messages: Message[];
 }
 
+interface QuestPlanResponse {
+  error?: unknown;
+  queries?: unknown;
+}
+
 const JOURNEY_STORAGE_KEY = "sidequest-journey";
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
@@ -34,6 +39,9 @@ export default function HomePage() {
   const [locationLabel, setLocationLabel] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<LocationCoordinates | null>(null);
   const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
+  const [isGeneratingQuestPlan, setIsGeneratingQuestPlan] = useState(false);
+  const [hasGeneratedQuestPlan, setHasGeneratedQuestPlan] = useState(false);
+  const [questPlanError, setQuestPlanError] = useState<string | null>(null);
   const timeoutIdsRef = useRef<number[]>([]);
   const {
     location,
@@ -143,6 +151,8 @@ export default function HomePage() {
     setLocationLabel("");
     setSelectedLocation(null);
     setIsUsingCurrentLocation(false);
+    setHasGeneratedQuestPlan(false);
+    setQuestPlanError(null);
     setScreen("setup");
   };
 
@@ -189,6 +199,8 @@ export default function HomePage() {
     setQuestName(nextQuestName);
     setLocationLabel(nextLocationLabel);
     setMessages(planningMessages);
+    setHasGeneratedQuestPlan(false);
+    setQuestPlanError(null);
     persistJourney(planningMessages, nextQuestName, nextLocationLabel);
     setScreen("planning");
   };
@@ -197,6 +209,45 @@ export default function HomePage() {
     clearPendingTimeouts();
     setIsTyping(false);
     setScreen("setup");
+  };
+
+  const handleGenerateQuestPlan = async () => {
+    const planningLocation = selectedLocation ?? location;
+    if (!planningLocation) {
+      setQuestPlanError("Choose a starting location before generating a quest plan.");
+      return;
+    }
+
+    setIsGeneratingQuestPlan(true);
+    setQuestPlanError(null);
+
+    try {
+      const response = await fetch("/api/quest-plan", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          locationLabel,
+          lat: planningLocation.latitude,
+          lng: planningLocation.longitude,
+        }),
+      });
+      const body = (await response.json()) as QuestPlanResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          typeof body.error === "string" ? body.error : "Quest planning is unavailable right now.",
+        );
+      }
+
+      console.log("[quest-planner] Proposed Moss queries:", body.queries);
+      setHasGeneratedQuestPlan(true);
+    } catch (error) {
+      setQuestPlanError(
+        error instanceof Error ? error.message : "Quest planning is unavailable right now.",
+      );
+    } finally {
+      setIsGeneratingQuestPlan(false);
+    }
   };
 
   const handleStartQuest = () => {
@@ -246,7 +297,11 @@ export default function HomePage() {
         recorderStatus={recorderStatus}
         durationSeconds={durationSeconds}
         recorderError={recorderError}
+        isGeneratingQuestPlan={isGeneratingQuestPlan}
+        hasGeneratedQuestPlan={hasGeneratedQuestPlan}
+        questPlanError={questPlanError}
         onBack={handlePlanningBack}
+        onGenerateQuestPlan={handleGenerateQuestPlan}
         onStartQuest={handleStartQuest}
         onStartRecording={startRecording}
         onStopRecording={stopRecording}

@@ -14,16 +14,16 @@
  * missing key fails with our message, not a 401 from the wire.
  */
 
-import { OpenRouter } from '@openrouter/sdk';
-import type { SDKOptions } from '@openrouter/sdk';
-import type { ChatMessages, ChatRequest } from '@openrouter/sdk/models';
+import { OpenRouter } from "@openrouter/sdk";
+import type { SDKOptions } from "@openrouter/sdk";
+import type { ChatMessages, ChatRequest } from "@openrouter/sdk/models";
 
-import { loadLlmConfig } from './config.ts';
-import type { LlmConfig, LlmEnv } from './config.ts';
-import { mapWithConcurrency } from './pool.ts';
+import { loadLlmConfig } from "./config.ts";
+import type { LlmConfig, LlmEnv } from "./config.ts";
+import { mapWithConcurrency } from "./pool.ts";
 
 /** The SDK's retry policy shape, reached through the option that consumes it. */
-type RetryConfig = NonNullable<SDKOptions['retryConfig']>;
+type RetryConfig = NonNullable<SDKOptions["retryConfig"]>;
 
 /**
  * Retries live in the SDK rather than in a loop here: it already implements
@@ -32,7 +32,7 @@ type RetryConfig = NonNullable<SDKOptions['retryConfig']>;
  * them.
  */
 const RETRY_CONFIG: RetryConfig = {
-  strategy: 'backoff',
+  strategy: "backoff",
   backoff: {
     initialInterval: 500,
     maxInterval: 8_000,
@@ -47,7 +47,7 @@ const RETRY_CONFIG: RetryConfig = {
 };
 
 /** 408/409/429 and the 5xx family — transient by definition. Auth/400s are not retried. */
-const RETRY_CODES = ['408', '409', '429', '500', '502', '503', '504'];
+const RETRY_CODES = ["408", "409", "429", "500", "502", "503", "504"];
 
 /** A message in OpenRouter's role-discriminated shape. Re-exported so callers need not import the SDK. */
 export type LlmMessage = ChatMessages;
@@ -89,7 +89,7 @@ export interface CompleteOptions {
   system?: string;
   temperature?: number;
   maxTokens?: number;
-  responseFormat?: ChatRequest['responseFormat'];
+  responseFormat?: ChatRequest["responseFormat"];
   timeoutMs?: number;
   signal?: AbortSignal;
   label?: string;
@@ -180,11 +180,11 @@ export function resetClient(): void {
  * this later, not in the transport.
  */
 function toMessages(input: LlmMessagesInput): LlmMessage[] {
-  if (typeof input === 'string') return [{ role: 'user', content: input }];
+  if (typeof input === "string") return [{ role: "user", content: input }];
 
   if (Array.isArray(input) && input.length > 0) return input;
 
-  throw new TypeError('messages must be a non-empty string or a non-empty array');
+  throw new TypeError("messages must be a non-empty string or a non-empty array");
 }
 
 /**
@@ -212,7 +212,7 @@ export async function complete(
   // A system prompt is prepended rather than merged, so callers can pass a
   // plain user string and still get steering.
   const finalMessages: LlmMessage[] = opts.system
-    ? [{ role: 'system', content: opts.system }, ...body]
+    ? [{ role: "system", content: opts.system }, ...body]
     : body;
 
   // Hoisted out of the request because `ChatRequest['model']` is optional in the
@@ -239,10 +239,13 @@ export async function complete(
         retries: RETRY_CONFIG,
         retryCodes: RETRY_CODES,
         signal: opts.signal,
+        headers: {
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
       },
     );
 
-    const text = result?.choices?.[0]?.message?.content ?? '';
+    const text = result?.choices?.[0]?.message?.content ?? "";
     const usage: LlmUsage | null = result?.usage ?? null;
 
     logCycle({
@@ -255,7 +258,7 @@ export async function complete(
 
     return {
       ok: true,
-      text: typeof text === 'string' ? text : JSON.stringify(text),
+      text: typeof text === "string" ? text : JSON.stringify(text),
       model: result?.model ?? model,
       id: result?.id ?? null,
       usage,
@@ -339,9 +342,9 @@ interface LogCycleArgs {
 
 /** One line per call (AGENTS.md). Never includes prompt or completion text. */
 function logCycle({ label, model, ms, usage, ok, error }: LogCycleArgs): void {
-  const tag = label ? `[llm:${label}]` : '[llm]';
-  const tokens = usage ? `${usage.totalTokens ?? '?'}tok` : 'no-usage';
-  const cost = usage?.cost != null ? ` $${usage.cost.toFixed(4)}` : '';
+  const tag = label ? `[llm:${label}]` : "[llm]";
+  const tokens = usage ? `${usage.totalTokens ?? "?"}tok` : "no-usage";
+  const cost = usage?.cost != null ? ` $${usage.cost.toFixed(4)}` : "";
 
   if (ok) {
     console.log(`${tag} ok model=${model} ${ms}ms ${tokens}${cost}`);
@@ -358,9 +361,9 @@ function logCycle({ label, model, ms, usage, ok, error }: LogCycleArgs): void {
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
 
-  if (typeof err === 'object' && err !== null && 'message' in err) {
+  if (typeof err === "object" && err !== null && "message" in err) {
     const { message } = err as { message?: unknown };
-    if (typeof message === 'string') return message;
+    if (typeof message === "string") return message;
   }
 
   return String(err);
@@ -368,9 +371,9 @@ function errorMessage(err: unknown): string {
 
 /** Status code off an SDK error, or null when the throwable does not carry one. */
 function errorStatus(err: unknown): number | null {
-  if (typeof err === 'object' && err !== null && 'statusCode' in err) {
+  if (typeof err === "object" && err !== null && "statusCode" in err) {
     const { statusCode } = err as { statusCode?: unknown };
-    if (typeof statusCode === 'number') return statusCode;
+    if (typeof statusCode === "number") return statusCode;
   }
 
   return null;
