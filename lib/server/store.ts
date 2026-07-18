@@ -13,8 +13,21 @@
  *      is what the Python _wait_until_ready() helper was reimplementing.
  */
 
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { MossClient } from '@moss-dev/moss';
 import type { DocumentInfo } from '@moss-dev/moss';
+
+// Do not overwrite credentials that were deliberately supplied by the process.
+// Node versions before loadEnvFile() must be launched with Moss credentials set.
+if (!process.env.MOSS_PROJECT_ID || !process.env.MOSS_PROJECT_KEY) {
+  const localEnvPath = fileURLToPath(new URL('../../.env.local', import.meta.url));
+  const envPath = existsSync(localEnvPath)
+    ? localEnvPath
+    : fileURLToPath(new URL('../../.env', import.meta.url));
+  if (existsSync(envPath) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envPath);
+}
 
 export interface Document {
   text: string;
