@@ -17,8 +17,9 @@ Run all of these from `server/`.
 
 | Command | What it does |
 |---|---|
-| `npm test` | Unit tests for pure location logic. No network, no credentials needed. |
+| `npm test` | Unit tests for pure location logic and the LLM concurrency pool. No network, no credentials needed. |
 | `npm run smoke` | Headless: mints a token and dispatches the agent. Proves credentials + agent name. |
+| `npm run llm:smoke` | Headless: one OpenRouter completion + a 3-item batch. Proves `OPENROUTER_API_KEY` and the batch path. Costs a few hundred tokens. |
 | `npm run dev` | Starts the token server and the browser test client on http://localhost:3001 |
 
 `npm run smoke` takes optional coordinates, since location is a runtime input:
