@@ -1,15 +1,22 @@
-HEAD
-node_modules/
-.next/
-out/
-*.tsbuildinfo
-.env*
+# Secrets — this repo goes public. Never commit real values.
+.env
+.env.*
 !.env.example
 
-.env
-spec.md
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-track-data
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build / runtime
+dist/
+build/
+.next/
+coverage/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
