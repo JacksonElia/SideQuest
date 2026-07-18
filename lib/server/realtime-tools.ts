@@ -60,8 +60,12 @@ export const REALTIME_TOOLS: RealtimeTool[] = [FIND_NEARBY_PLACES_TOOL];
 
 /**
  * The session.update payload the browser sends right after the data channel
- * opens. Model and voice come from the server mint; the client never picks them
- * itself (so a malicious page can't downgrade the model or swap voices).
+ * opens. Model and voice come from the server mint; the client never picks
+ * them itself (so a malicious page can't downgrade the model or swap voices).
+ *
+ * Aligned with the GA session shape — instructions live at session.instructions
+ * (top-level under session), tools live at session.tools, voice under
+ * session.audio.output.voice.
  */
 export function buildSessionUpdate(
   cfg: OpenAIConfig,
@@ -71,14 +75,14 @@ export function buildSessionUpdate(
   return {
     type: 'session.update',
     session: {
-      modalities: ['text', 'audio'],
       instructions,
-      voice: cfg.voice,
-      input_audio_format: 'pcm16',
-      output_audio_format: 'pcm16',
-      turn_detection: { type: 'server_vad' },
+      audio: { output: { voice: cfg.voice } },
       tools,
       tool_choice: 'auto',
+      // Server-side VAD handles end-of-utterance detection. No local VAD
+      // means no forked native process to bring up — the same trade the
+      // LiveKit worker made when it set `vad: null`.
+      turn_detection: { type: 'server_vad' },
     },
   };
 }

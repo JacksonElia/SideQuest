@@ -5,9 +5,10 @@
  *
  * Opens a WebRTC peer connection straight to OpenAI's Realtime API using an
  * ephemeral client secret minted by POST /api/session. Audio flows over the
- * peer connection; session control and tool calls flow over a "oai-events"
- * data channel. Tool execution lives server-side at POST /api/tool because the
- * browser cannot safely call Moss.
+ * peer connection (the model plays through the remote track automatically);
+ * session control and tool calls flow over an "oai-events" data channel.
+ * Tool execution lives server-side at POST /api/tool because the browser
+ * cannot safely call Moss.
  *
  * One session spans planning and active screens on purpose — the model
  * changes mode by itself, so tearing the connection down between screens would
@@ -57,7 +58,7 @@ export interface VoiceDiagnostics {
    * turn never commits.
    */
   agentState: "idle" | "thinking" | "speaking" | null;
-  /** True once we've received the first response.audio.delta from the model. */
+  /** True once the model's audio track is attached to a playing element. */
   agentAudioSubscribed: boolean;
   /** The published track's enabled flag, distinct from user-intent `isMuted`. */
   micTrackEnabled: boolean;
@@ -101,10 +102,8 @@ interface ToolCallResponse {
   output: Record<string, unknown>;
 }
 
-const REALTIME_OFFER_URL_BASE = "https://api.openai.com/v1/realtime";
+const REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const DATA_CHANNEL_LABEL = "oai-events";
-/** 24 kHz mono PCM16 — matches what OpenAI Realtime emits on the wire. */
-const OUTPUT_SAMPLE_RATE = 24_000;
 
 interface UseVoiceSessionResult {
   status: VoiceStatus;
@@ -135,10 +134,8 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const localTrackRef = useRef<MediaStreamTrack | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const outputContextRef = useRef<AudioContext | null>(null);
-  const outputQueueRef = useRef<AudioBufferSourceNode[]>([]);
-  const nextPlayTimeRef = useRef<number>(0);
   const connectingRef = useRef(false);
   const levelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentLocationRef = useRef<ToolCallRequest | null>(null);
@@ -203,18 +200,14 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     });
   }, []);
 
-  const teardownAudio = useCallback(() => {
-    outputQueueRef.current.forEach((node) => {
-      try {
-        node.stop();
-      } catch {
-        // Already stopped.
-      }
-    });
-    outputQueueRef.current = [];
-    nextPlayTimeRef.current = 0;
-    void outputContextRef.current?.close().catch(() => {});
-    outputContextRef.current = null;
+  const teardownRemoteAudio = useCallback(() => {
+    const element = remoteAudioRef.current;
+    if (element) {
+      element.pause();
+      element.srcObject = null;
+      element.remove();
+      remoteAudioRef.current = null;
+    }
   }, []);
 
   const disconnect = useCallback(async () => {
@@ -222,7 +215,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     pcRef.current = null;
     dataChannelRef.current = null;
     connectingRef.current = false;
-    teardownAudio();
+    teardownRemoteAudio();
     stopLevelMeter();
 
     localTrackRef.current?.stop();
@@ -239,52 +232,17 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     setIsAgentSpeaking(false);
     setIsMuted(false);
     setDiagnostics(INITIAL_DIAGNOSTICS);
-  }, [stopLevelMeter, teardownAudio]);
+  }, [stopLevelMeter, teardownRemoteAudio]);
 
   /**
-   * Decode a single OpenAI audio.delta chunk and queue it for playback.
-   * Chunks arrive as base64-encoded PCM16 mono at OUTPUT_SAMPLE_RATE.
+   * Dispatch a typed Realtime event onto the data channel. No-op if the
+   * channel isn't open yet — race between data-channel-open and connect()
+   * shouldn't double-fire session.update.
    */
-  const queueAudioChunk = useCallback((base64: string) => {
-    if (!outputContextRef.current) {
-      outputContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
-      void outputContextRef.current.resume().catch(() => {});
-    }
-    const ctx = outputContextRef.current;
-    if (!ctx) return;
-
-    const binary = atob(base64);
-    const int16 = new Int16Array(binary.length / 2);
-    for (let i = 0; i < int16.length; i += 1) {
-      // Little-endian PCM16.
-      const low = binary.charCodeAt(i * 2);
-      const high = binary.charCodeAt(i * 2 + 1);
-      int16[i] = (high << 8) | low;
-    }
-    const buffer = ctx.createBuffer(1, int16.length, OUTPUT_SAMPLE_RATE);
-    // Web Audio wants Float32 in [-1, 1]; PCM16 is [-32768, 32767].
-    const floats = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i += 1) {
-      floats[i] = int16[i] / 32768;
-    }
-    buffer.copyToChannel(floats, 0);
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    // Gapless scheduling: each chunk starts where the last one will end. If
-    // the queue has fallen behind, jump straight to "now" so the user doesn't
-    // hear buffered-up audio burst out at once.
-    const now = ctx.currentTime;
-    const startAt = Math.max(now, nextPlayTimeRef.current);
-    source.start(startAt);
-    nextPlayTimeRef.current = startAt + buffer.duration;
-    outputQueueRef.current.push(source);
-    source.onended = () => {
-      const idx = outputQueueRef.current.indexOf(source);
-      if (idx >= 0) outputQueueRef.current.splice(idx, 1);
-    };
+  const sendOnDataChannel = useCallback((event: Record<string, unknown>) => {
+    const channel = dataChannelRef.current;
+    if (!channel || channel.readyState !== "open") return;
+    channel.send(JSON.stringify(event));
   }, []);
 
   /**
@@ -371,19 +329,8 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
         sendOnDataChannel({ type: "response.create" });
       }
     },
-    [patchDiagnostics],
+    [patchDiagnostics, sendOnDataChannel],
   );
-
-  /**
-   * Dispatch a typed Realtime event onto the data channel. No-op if the
-   * channel isn't open yet — race between data-channel-open and connect()
-   * shouldn't double-fire session.update.
-   */
-  const sendOnDataChannel = useCallback((event: Record<string, unknown>) => {
-    const channel = dataChannelRef.current;
-    if (!channel || channel.readyState !== "open") return;
-    channel.send(JSON.stringify(event));
-  }, []);
 
   const handleRealtimeEvent = useCallback(
     (event: Record<string, unknown>) => {
@@ -418,15 +365,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           patchDiagnostics({ agentState: "speaking" });
           setIsAgentSpeaking(true);
           break;
-        case "response.audio.delta": {
-          const delta = event.delta;
-          if (typeof delta === "string") {
-            queueAudioChunk(delta);
-            patchDiagnostics({ agentAudioSubscribed: true });
-          }
-          break;
-        }
-        case "response.audio_transcript.delta": {
+        case "response.output_audio_transcript.delta": {
           const delta = event.delta;
           if (typeof delta === "string" && delta.length > 0) {
             upsertMessage({
@@ -439,7 +378,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           }
           break;
         }
-        case "response.audio_transcript.done": {
+        case "response.output_audio_transcript.done": {
           const transcript = event.transcript;
           if (typeof transcript === "string" && transcript.trim()) {
             upsertMessage({
@@ -474,7 +413,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           break;
       }
     },
-    [executeToolCall, patchDiagnostics, queueAudioChunk, upsertMessage],
+    [executeToolCall, patchDiagnostics, upsertMessage],
   );
 
   const connect = useCallback(async () => {
@@ -558,6 +497,18 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     const pc = new RTCPeerConnection();
     pcRef.current = pc;
 
+    // With WebRTC, the model's audio plays automatically through the remote
+    // track — we just need an element to receive it. Kept off the React tree
+    // because attaching/detaching on every re-render fights autoplay.
+    const remoteAudio = document.createElement("audio");
+    remoteAudio.autoplay = true;
+    remoteAudioRef.current = remoteAudio;
+
+    pc.ontrack = (e) => {
+      remoteAudio.srcObject = e.streams[0];
+      patchDiagnostics({ agentAudioSubscribed: true });
+    };
+
     pc.addTrack(track, stream);
 
     const dataChannel = pc.createDataChannel(DATA_CHANNEL_LABEL);
@@ -602,17 +553,14 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
 
     let answerSdp: string;
     try {
-      const response = await fetch(
-        `${REALTIME_OFFER_URL_BASE}?model=${encodeURIComponent(session.model)}`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${session.clientSecret}`,
-            "Content-Type": "application/sdp",
-          },
-          body: offer.sdp ?? "",
+      const response = await fetch(REALTIME_CALLS_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.clientSecret}`,
+          "Content-Type": "application/sdp",
         },
-      );
+        body: offer.sdp ?? "",
+      });
       if (!response.ok) {
         throw new Error(`OpenAI Realtime rejected the offer (HTTP ${response.status})`);
       }

@@ -15,7 +15,7 @@ export interface OpenAIConfig {
 }
 
 const DEFAULT_MODEL = 'gpt-realtime';
-const DEFAULT_VOICE = 'alloy';
+const DEFAULT_VOICE = 'marin';
 
 export function loadOpenAIConfig(): OpenAIConfig {
   const cfg: OpenAIConfig = {
