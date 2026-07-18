@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@inferedge/moss": "^1.0.0-beta.8",
+    "@moss-dev/moss": "^1.4.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.12",
     "livekit-client": "^2.20.1",
