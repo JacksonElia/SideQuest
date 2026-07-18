@@ -13,11 +13,10 @@
  *      is what the Python _wait_until_ready() helper was reimplementing.
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
-import { MossClient } from '@moss-dev/moss';
-import type { DocumentInfo } from '@moss-dev/moss';
+import type { DocumentInfo, MossClient } from "@moss-dev/moss";
 
 // Do not overwrite credentials that were deliberately supplied by the process.
 // Node versions before loadEnvFile() must be launched with Moss credentials set.
@@ -29,9 +28,9 @@ import type { DocumentInfo } from '@moss-dev/moss';
 // .env.local itself, so in the app this loop finds nothing to do — it exists for
 // the plain-node smoke scripts, which run from the repo root.
 if (!process.env.MOSS_PROJECT_ID || !process.env.MOSS_PROJECT_KEY) {
-  for (const envFile of ['.env.local', '.env']) {
+  for (const envFile of [".env.local", ".env"]) {
     const envPath = join(process.cwd(), envFile);
-    if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
+    if (existsSync(envPath) && typeof process.loadEnvFile === "function") {
       process.loadEnvFile(envPath);
       break;
     }
@@ -87,9 +86,9 @@ const TOKEN_PATTERN = /\b\w+\b/g;
  * STORE_BACKEND=moss to opt back into the real backend.
  */
 export function createStore(backend?: string): Store {
-  const selected = (backend ?? process.env.STORE_BACKEND ?? 'fake').toLowerCase();
-  if (selected === 'fake') return new FakeStore();
-  if (selected === 'moss') return new MossStore();
+  const selected = (backend ?? process.env.STORE_BACKEND ?? "fake").toLowerCase();
+  if (selected === "fake") return new FakeStore();
+  if (selected === "moss") return new MossStore();
   throw new Error(`Unsupported STORE_BACKEND: ${selected}`);
 }
 
@@ -150,15 +149,20 @@ export class FakeStore implements Store {
 
 /** Store backed by the real Moss SDK. */
 export class MossStore implements Store {
-  #client: MossClient;
+  #clientPromise: Promise<MossClient> | null = null;
   #loadedIndexes = new Map<string, Promise<boolean>>();
+  #projectId: string;
+  #projectKey: string;
 
   constructor() {
-    // Hackathon hardcoding: fall back to the demo Moss project so the query
-    // path works even without .env.local. Real env always wins.
-    const projectId = process.env.MOSS_PROJECT_ID || 'be361845-8ac2-41a1-8881-29f30b38456c';
-    const projectKey = process.env.MOSS_PROJECT_KEY || 'moss_DlU1mI8wr0udWEpd32Z7irMqJGN2vROd';
-    this.#client = new MossClient(projectId, projectKey, { cachePath: mossCachePath() });
+    const projectId = process.env.MOSS_PROJECT_ID;
+    const projectKey = process.env.MOSS_PROJECT_KEY;
+    if (!projectId || !projectKey) {
+      throw new Error("MOSS_PROJECT_ID and MOSS_PROJECT_KEY must be set before loading Moss.");
+    }
+
+    this.#projectId = projectId;
+    this.#projectKey = projectKey;
   }
 
   /**
@@ -179,7 +183,7 @@ export class MossStore implements Store {
       // re-fetching it. On Vercel only /tmp is writable, and it survives for the
       // life of the instance — so this pays off across requests but not across
       // cold starts. See mossCachePath().
-      await this.#client.loadIndex(indexName, { cachePath: mossCachePath() });
+      await (await this.#client()).loadIndex(indexName, { cachePath: mossCachePath() });
       return true;
     })();
 
@@ -203,7 +207,7 @@ export class MossStore implements Store {
     const mossDocs = docs.map((doc) => toMossDoc(indexName, doc));
     const existed = await this.#ensureIndex(indexName, mossDocs);
     if (mossDocs.length && existed) {
-      await this.#client.addDocs(indexName, mossDocs, { upsert: true });
+      await (await this.#client()).addDocs(indexName, mossDocs, { upsert: true });
     }
   }
 
@@ -219,7 +223,11 @@ export class MossStore implements Store {
     // candidate pool has to be widened first or the filters would be applied to
     // an already-truncated top-K and silently starve the result set.
     const candidateCount = filters || radiusM !== null ? Math.max(topK, 100) : topK;
-    const response = await this.#client.query(indexName, queryText, { topK: candidateCount });
+    const response = await (
+      await this.#client()
+    ).query(indexName, queryText, {
+      topK: candidateCount,
+    });
 
     const matches: SearchResult[] = [];
     for (const doc of response.docs) {
@@ -249,7 +257,7 @@ export class MossStore implements Store {
     }));
 
     if (changed.length) {
-      await this.#client.addDocs(indexName, changed, { upsert: true });
+      await (await this.#client()).addDocs(indexName, changed, { upsert: true });
     }
   }
 
@@ -258,21 +266,21 @@ export class MossStore implements Store {
 
     const docIds = (await this.#matchingMossDocs(indexName, filters)).map((doc) => doc.id);
     if (docIds.length) {
-      await this.#client.deleteDocs(indexName, docIds);
+      await (await this.#client()).deleteDocs(indexName, docIds);
     }
   }
 
   /** Return whether the index exists, creating it from supplied documents if missing. */
   async #ensureIndex(indexName: string, docs?: DocumentInfo[]): Promise<boolean> {
     try {
-      await this.#client.getIndex(indexName);
+      await (await this.#client()).getIndex(indexName);
       return true;
     } catch (error) {
       if (!/INDEX_NOT_FOUND/i.test(String(error))) throw error;
       if (!docs?.length) return false;
       // createIndex resolves only once the build is Ready, so the Python
       // _wait_until_ready() poll loop is no longer needed here.
-      await this.#client.createIndex(indexName, docs);
+      await (await this.#client()).createIndex(indexName, docs);
       return false;
     }
   }
@@ -281,8 +289,28 @@ export class MossStore implements Store {
     indexName: string,
     filters: Record<string, unknown>,
   ): Promise<DocumentInfo[]> {
-    const docs = await this.#client.getDocs(indexName);
+    const docs = await (await this.#client()).getDocs(indexName);
     return docs.filter((doc) => matchesFilters(decodeMetadata(doc.metadata ?? {}), filters));
+  }
+
+  /**
+   * The native Moss binding is unsupported by Vercel's current Linux runtime.
+   * Keep its import behind real Moss operations so fake-backend deployments can
+   * build and serve without loading the addon.
+   */
+  async #client(): Promise<MossClient> {
+    if (this.#clientPromise) return this.#clientPromise;
+
+    const pending = import("@moss-dev/moss").then(
+      ({ MossClient }) =>
+        new MossClient(this.#projectId, this.#projectKey, { cachePath: mossCachePath() }),
+    );
+    this.#clientPromise = pending;
+    pending.catch(() => {
+      if (this.#clientPromise === pending) this.#clientPromise = null;
+    });
+
+    return pending;
   }
 }
 
@@ -295,7 +323,7 @@ export class MossStore implements Store {
  */
 function mossCachePath(): string {
   if (process.env.MOSS_MODEL_CACHE_DIR) return process.env.MOSS_MODEL_CACHE_DIR;
-  return process.env.VERCEL ? '/tmp/moss-cache' : '.moss-cache';
+  return process.env.VERCEL ? "/tmp/moss-cache" : ".moss-cache";
 }
 
 /**
@@ -308,7 +336,7 @@ function mossCachePath(): string {
  */
 function toMossDoc(indexName: string, doc: Document): DocumentInfo {
   const metadata = { ...doc.metadata };
-  const placeId = metadata.place_id ?? '';
+  const placeId = metadata.place_id ?? "";
   return {
     id: stableId(`${indexName}:${String(placeId)}:${doc.text}`),
     text: doc.text,
@@ -329,17 +357,17 @@ function stableId(input: string): string {
       hash ^= byte;
       hash = Math.imul(hash, 0x01000193) >>> 0;
     }
-    hex.push(hash.toString(16).padStart(8, '0'));
+    hex.push(hash.toString(16).padStart(8, "0"));
   }
 
-  const joined = hex.join('');
+  const joined = hex.join("");
   return [
     joined.slice(0, 8),
     joined.slice(8, 12),
     joined.slice(12, 16),
     joined.slice(16, 20),
     joined.slice(20, 32),
-  ].join('-');
+  ].join("-");
 }
 
 function tokens(text: string): Set<string> {
@@ -385,9 +413,9 @@ function withinRadius(
 ): boolean {
   if (radiusM === null || radiusM === undefined) return true;
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
-    throw new Error('lat and lng are required when radiusM is set');
+    throw new Error("lat and lng are required when radiusM is set");
   }
-  if (!('lat' in metadata) || !('lng' in metadata)) return false;
+  if (!("lat" in metadata) || !("lng" in metadata)) return false;
   return haversineM(lat, lng, Number(metadata.lat), Number(metadata.lng)) <= radiusM;
 }
 

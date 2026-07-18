@@ -31,3 +31,9 @@ npm run dev
 | `POST /api/guide-answer` | Retrieves nearby Moss records and uses OpenRouter to answer the typed guide question.       |
 
 The first Moss request on a cold process can download the index and embedding model. Later requests reuse the loaded index.
+
+## Vercel
+
+The current Moss native binding requires a newer GLIBC version than Vercel provides. Set
+`STORE_BACKEND=fake` (or leave it unset) for Vercel deployments. The guide and OpenRouter
+features work with the built-in landmark records; real Moss retrieval must run on a compatible host.
