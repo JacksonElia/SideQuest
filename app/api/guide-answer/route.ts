@@ -50,7 +50,11 @@ export async function POST(request: Request) {
   const question = body.question.trim();
   const result = await query(fix.value.lat, fix.value.lng, question);
   const places = toGuidePlaces(result.chunks);
-  const generated = await generateGuideAnswer({ question, places });
+  const generated = await generateGuideAnswer({
+    question,
+    places,
+    location: { latitude: fix.value.lat, longitude: fix.value.lng },
+  });
   const answer = generated.ok
     ? generated.answer
     : fallbackGuideAnswer(
