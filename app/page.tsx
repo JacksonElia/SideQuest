@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Home, MapPin, ScrollText } from "lucide-react";
-import { ChatInput } from "@/components/Chat/ChatInput";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
 import { TravelPlanCard } from "@/components/Plan/TravelPlanCard";
@@ -123,7 +122,7 @@ export default function HomePage() {
   // mode by itself, so reconnecting between screens would restart the
   // conversation and discard everything it had learned.
   const voice = useVoiceSession(location);
-  const { connect: connectVoice, disconnect: disconnectVoice, toggleMute, sendText } = voice;
+  const { connect: connectVoice, disconnect: disconnectVoice, toggleMute } = voice;
 
   const messages = useMemo(
     () => [...restoredMessages, ...voice.messages],
@@ -453,13 +452,8 @@ export default function HomePage() {
               </p>
             )}
 
-            {/* Typing and talking sit on one row so the composer costs a single
-                line of the screen instead of a stacked block. */}
-            <div className="flex shrink-0 items-end gap-2 border-t border-[#dfceb1] bg-[#fffaf0] px-4 py-3">
-              <div className="min-w-0 flex-1 pb-4">
-                {/* Sending connects on demand, so the mic never has to be tapped first. */}
-                <ChatInput onSend={sendText} />
-              </div>
+            {/* Voice is the only way in: the mic sits alone on the composer row. */}
+            <div className="flex shrink-0 items-center justify-center border-t border-[#dfceb1] bg-[#fffaf0] px-4 py-3">
               <VoiceButton
                 status={voice.status}
                 isMuted={voice.isMuted}

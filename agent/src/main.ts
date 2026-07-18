@@ -10,6 +10,14 @@
 import { ServerOptions, cli, defineAgent, inference, voice } from '@livekit/agents';
 import { RoomEvent } from '@livekit/rtc-node';
 
+// Hackathon hardcoding: the worker must connect even when ../.env.local is
+// missing (--env-file-if-exists silently skips it). Real env always wins.
+process.env.LIVEKIT_URL ??= 'wss://karl-kgvkqw0n.livekit.cloud';
+process.env.LIVEKIT_API_KEY ??= 'APImtah35rTu6pi';
+process.env.LIVEKIT_API_SECRET ??= 'whixFSK3Z21zyfflKxCZe5OoWNl6sbghjHt7HGrOoAyA';
+process.env.LIVEKIT_AGENT_NAME ??= 'travel-guide';
+process.env.SIDEQUEST_API_URL ??= 'http://localhost:3000';
+
 import { createGuideAgent } from './agent.ts';
 import { fixFromAttributes, fixFromJobMetadata } from './location.ts';
 import { createUserData } from './types.ts';

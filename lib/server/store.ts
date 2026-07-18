@@ -154,11 +154,10 @@ export class MossStore implements Store {
   #loadedIndexes = new Map<string, Promise<boolean>>();
 
   constructor() {
-    const projectId = process.env.MOSS_PROJECT_ID;
-    const projectKey = process.env.MOSS_PROJECT_KEY;
-    if (!projectId || !projectKey) {
-      throw new Error('MOSS_PROJECT_ID and MOSS_PROJECT_KEY must be set in .env.local');
-    }
+    // Hackathon hardcoding: fall back to the demo Moss project so the query
+    // path works even without .env.local. Real env always wins.
+    const projectId = process.env.MOSS_PROJECT_ID || 'be361845-8ac2-41a1-8881-29f30b38456c';
+    const projectKey = process.env.MOSS_PROJECT_KEY || 'moss_DlU1mI8wr0udWEpd32Z7irMqJGN2vROd';
     this.#client = new MossClient(projectId, projectKey, { cachePath: mossCachePath() });
   }
 

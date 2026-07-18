@@ -37,14 +37,23 @@ function readWithAlias(canonical: string, aliases: string[] = []): string | unde
   return undefined;
 }
 
+// Hackathon hardcoding: keep the voice path alive even when .env.local is
+// absent or partially filled. Real env always wins over these.
+const HARDCODED = {
+  livekitUrl: 'wss://karl-kgvkqw0n.livekit.cloud',
+  apiKey: 'APImtah35rTu6pi',
+  apiSecret: 'whixFSK3Z21zyfflKxCZe5OoWNl6sbghjHt7HGrOoAyA',
+  agentName: 'travel-guide',
+};
+
 export function loadConfig(): LiveKitConfig {
   const cfg = {
     // The SDK reads LIVEKIT_URL itself when a client is constructed bare, so the
     // canonical name matters beyond our own code.
-    livekitUrl: readWithAlias('LIVEKIT_URL', ['LIVEKIT_WEBSOCKET_URL']),
-    apiKey: readWithAlias('LIVEKIT_API_KEY', ['LIVEKEY_API_KEY']),
-    apiSecret: process.env.LIVEKIT_API_SECRET,
-    agentName: process.env.LIVEKIT_AGENT_NAME,
+    livekitUrl: readWithAlias('LIVEKIT_URL', ['LIVEKIT_WEBSOCKET_URL']) ?? HARDCODED.livekitUrl,
+    apiKey: readWithAlias('LIVEKIT_API_KEY', ['LIVEKEY_API_KEY']) ?? HARDCODED.apiKey,
+    apiSecret: process.env.LIVEKIT_API_SECRET || HARDCODED.apiSecret,
+    agentName: process.env.LIVEKIT_AGENT_NAME || HARDCODED.agentName,
     agentId: process.env.LIVEKIT_AGENT_ID ?? null, // reference only; dispatch uses the name
   };
 
