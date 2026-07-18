@@ -1,0 +1,1 @@
+"""SideQuest query entry points."""

@@ -1,6 +1,15 @@
+HEAD
 node_modules/
 .next/
 out/
 *.tsbuildinfo
 .env*
 !.env.example
+
+.env
+spec.md
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+track-data
