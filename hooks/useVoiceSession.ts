@@ -254,15 +254,20 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     if (!ctx) return;
 
     const binary = atob(base64);
-    const bytes = new Int16Array(binary.length / 2);
-    for (let i = 0; i < bytes.length; i += 1) {
+    const int16 = new Int16Array(binary.length / 2);
+    for (let i = 0; i < int16.length; i += 1) {
       // Little-endian PCM16.
       const low = binary.charCodeAt(i * 2);
       const high = binary.charCodeAt(i * 2 + 1);
-      bytes[i] = (high << 8) | low;
+      int16[i] = (high << 8) | low;
     }
-    const buffer = ctx.createBuffer(1, bytes.length, OUTPUT_SAMPLE_RATE);
-    buffer.copyToChannel(bytes, 0);
+    const buffer = ctx.createBuffer(1, int16.length, OUTPUT_SAMPLE_RATE);
+    // Web Audio wants Float32 in [-1, 1]; PCM16 is [-32768, 32767].
+    const floats = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i += 1) {
+      floats[i] = int16[i] / 32768;
+    }
+    buffer.copyToChannel(floats, 0);
 
     const source = ctx.createBufferSource();
     source.buffer = buffer;

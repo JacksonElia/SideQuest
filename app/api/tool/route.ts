@@ -70,7 +70,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 }
 
-function runFindNearbyPlaces(body: ToolCallBody): NextResponse {
+async function runFindNearbyPlaces(body: ToolCallBody): Promise<NextResponse> {
   const args = body.arguments ?? {};
   const utterance = args.utterance;
   if (typeof utterance !== 'string' || !utterance.trim()) {
@@ -101,12 +101,12 @@ function runFindNearbyPlaces(body: ToolCallBody): NextResponse {
   // Fire-and-await: the model is already paused waiting on this call_id. We
   // deliberately do not catch here — a real failure becomes the model seeing
   // an error output, which it can speak about.
-  const result: QueryResult = query({
-    lat: fix.value.lat,
-    lng: fix.value.lng,
-    utterance: utterance.slice(0, 500),
-    constraints: Object.keys(constraints).length ? constraints : null,
-  });
+  const result: QueryResult = await query(
+    fix.value.lat,
+    fix.value.lng,
+    utterance.slice(0, 500),
+    Object.keys(constraints).length ? constraints : null,
+  );
 
   // Flatten chunks into the spoken-language-ready shape the guide expects.
   // Mirrors what agent/src/moss.ts used to do; we keep it inline rather than
