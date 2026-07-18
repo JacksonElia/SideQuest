@@ -7,6 +7,7 @@ import copy
 import math
 import os
 import re
+import time
 import uuid
 from abc import ABC, abstractmethod
 from typing import Any
@@ -128,6 +129,7 @@ class MossStore(Store):
             return
         if not self._index_exists(index_name):
             _run(self._client.create_index(index_name, moss_docs))
+            self._wait_until_ready(index_name)
             return
         _run(self._client.add_docs(index_name, moss_docs, MutationOptions(upsert=True)))
 
@@ -142,6 +144,7 @@ class MossStore(Store):
         top_k: int = 5,
     ) -> list[SearchResult]:
         candidate_count = max(top_k, 100) if filters or radius_m is not None else top_k
+        _run(self._client.load_index(index_name))
         response = _run(self._client.query(index_name, query_text, QueryOptions(top_k=candidate_count)))
         matches = [
             {
@@ -181,6 +184,18 @@ class MossStore(Store):
     def _matching_moss_docs(self, index_name: str, filters: dict) -> list[DocumentInfo]:
         docs = _run(self._client.get_docs(index_name, GetDocumentsOptions()))
         return [doc for doc in docs if _matches_filters(dict(doc.metadata or {}), filters)]
+
+    def _wait_until_ready(self, index_name: str, timeout_s: float = 60.0) -> None:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            status = _run(self._client.get_index(index_name)).status
+            if status == "Ready":
+                return
+            if status == "Failed":
+                raise RuntimeError(f"Moss index '{index_name}' failed to build")
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Moss index '{index_name}' was not Ready within {timeout_s:.0f}s")
+            time.sleep(1)
 
     @staticmethod
     def _to_moss_doc(index_name: str, doc: Document) -> DocumentInfo:
