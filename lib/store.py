@@ -123,6 +123,17 @@ class MossStore(Store):
         if not project_id or not project_key:
             raise ValueError("MOSS_PROJECT_ID and MOSS_PROJECT_KEY must be set in .env")
         self._client = MossClient(project_id, project_key)
+        self._loaded_indexes: set[str] = set()
+
+    def load_index(self, index_name: str) -> bool:
+        """Load an existing index once so later queries stay on the hot path."""
+        if index_name in self._loaded_indexes:
+            return True
+        if not self._ensure_index(index_name):
+            return False
+        _run(self._client.load_index(index_name))
+        self._loaded_indexes.add(index_name)
+        return True
 
     def add_docs(self, index_name: str, docs: list[Document]) -> None:
         moss_docs = [self._to_moss_doc(index_name, doc) for doc in docs]
@@ -140,10 +151,9 @@ class MossStore(Store):
         filters: dict | None = None,
         top_k: int = 5,
     ) -> list[SearchResult]:
-        if not self._ensure_index(index_name):
+        if not self.load_index(index_name):
             return []
         candidate_count = max(top_k, 100) if filters or radius_m is not None else top_k
-        _run(self._client.load_index(index_name))
         response = _run(self._client.query(index_name, query_text, QueryOptions(top_k=candidate_count)))
         matches = [
             {
