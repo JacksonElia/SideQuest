@@ -12,9 +12,16 @@ import { QuestWelcome } from "@/components/Quest/QuestWelcome";
 import { VoiceButton } from "@/components/Voice/VoiceButton";
 import { useLocation } from "@/hooks/useLocation";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
-import type { LocationCoordinates, Message } from "@/types/message";
+import type { QuestPlace } from "@/components/Plan/TravelPlanCard";
+import type { LocationCoordinates, Message, TravelProfile } from "@/types/message";
 
 type QuestScreen = "welcome" | "setup" | "scoping" | "main";
+
+interface QuestPlanResponse {
+  queries?: unknown;
+  places?: unknown;
+  error?: unknown;
+}
 
 interface SavedJourney {
   questName: string;
@@ -23,6 +30,39 @@ interface SavedJourney {
 }
 
 const JOURNEY_STORAGE_KEY = "sidequest-journey";
+const MAX_PLACE_DETAIL_CHARS = 120;
+
+/**
+ * Narrow the retrieved chunks down to what the plan card renders.
+ *
+ * The response is server data rather than a typed contract at this boundary, so
+ * anything without a usable name is dropped instead of rendering as "undefined".
+ */
+function toQuestPlaces(value: unknown): QuestPlace[] {
+  if (!Array.isArray(value)) return [];
+
+  const places: QuestPlace[] = [];
+  for (const chunk of value) {
+    if (typeof chunk !== "object" || chunk === null) continue;
+
+    const { metadata, text } = chunk as { metadata?: unknown; text?: unknown };
+    const name =
+      typeof metadata === "object" && metadata !== null
+        ? (metadata as { name?: unknown }).name
+        : undefined;
+    if (typeof name !== "string" || !name.trim()) continue;
+
+    const detail = typeof text === "string" && text.trim() ? text.trim() : null;
+    places.push({
+      name: name.trim(),
+      detail: detail && detail.length > MAX_PLACE_DETAIL_CHARS
+        ? `${detail.slice(0, MAX_PLACE_DETAIL_CHARS).trimEnd()}…`
+        : detail,
+    });
+  }
+
+  return places;
+}
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
 export default function HomePage() {
@@ -33,6 +73,10 @@ export default function HomePage() {
   const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
   /** Transcript restored from a previous visit, shown above the live one. */
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
+  /** Stops retrieved for the quest, once the guide has saved a profile. */
+  const [questPlaces, setQuestPlaces] = useState<QuestPlace[]>([]);
+  const [isLoadingPlaces, setIsLoadingPlaces] = useState(false);
+  const [placesError, setPlacesError] = useState<string | null>(null);
 
   const {
     location,
@@ -110,6 +154,65 @@ export default function HomePage() {
     advanceToMain();
   }, [advanceToMain, screen, voice.profile]);
 
+  /**
+   * The saved profile is also what the quest plan is built from, so the same
+   * signal that ends planning starts retrieval. The four answers the planner
+   * needs are exactly the four the guide just collected, which is why nothing
+   * here is hardcoded any more.
+   */
+  const questPlanFetchedRef = useRef(false);
+  useEffect(() => {
+    const profile: TravelProfile | null = voice.profile;
+    const fix = selectedLocation ?? location;
+    if (!profile || !fix || questPlanFetchedRef.current) {
+      return;
+    }
+    questPlanFetchedRef.current = true;
+
+    // Latch rather than abort: the profile arrives once per conversation, and a
+    // late response is still the right answer for the plan on screen.
+    let cancelled = false;
+    setIsLoadingPlaces(true);
+    setPlacesError(null);
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/quest-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locationLabel: locationLabel || "Current location",
+            lat: fix.latitude,
+            lng: fix.longitude,
+            profile,
+          }),
+        });
+
+        const body = (await response.json()) as QuestPlanResponse;
+        if (cancelled) return;
+
+        if (!response.ok) {
+          setPlacesError(
+            typeof body.error === "string" ? body.error : "Could not build your quest plan.",
+          );
+          return;
+        }
+
+        setQuestPlaces(toQuestPlaces(body.places));
+      } catch {
+        if (!cancelled) {
+          setPlacesError("Could not reach the quest planner.");
+        }
+      } finally {
+        if (!cancelled) setIsLoadingPlaces(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [location, locationLabel, selectedLocation, voice.profile]);
+
   const handleStartNewQuest = () => {
     setRestoredMessages([]);
     setQuestName("The Little Detour");
@@ -117,6 +220,10 @@ export default function HomePage() {
     setSelectedLocation(null);
     setIsUsingCurrentLocation(false);
     hasAdvancedRef.current = false;
+    questPlanFetchedRef.current = false;
+    setQuestPlaces([]);
+    setPlacesError(null);
+    setIsLoadingPlaces(false);
     setScreen("setup");
   };
 
@@ -259,6 +366,9 @@ export default function HomePage() {
             questName={questName}
             locationLabel={locationLabel}
             profile={voice.profile}
+            places={questPlaces}
+            isLoadingPlaces={isLoadingPlaces}
+            placesError={placesError}
           />
 
           <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">

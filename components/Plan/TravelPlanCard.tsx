@@ -1,13 +1,23 @@
 "use client";
 
-import { Compass, Footprints, Route, ScrollText, Wallet } from "lucide-react";
+import { Compass, Footprints, MapPin, Route, ScrollText, Wallet } from "lucide-react";
 import type { TravelProfile } from "@/types/message";
+
+/** A stop retrieved for the quest, trimmed to what this card renders. */
+export interface QuestPlace {
+  name: string;
+  detail: string | null;
+}
 
 interface TravelPlanCardProps {
   questName: string;
   locationLabel: string;
   /** What the guide learned in planning mode. Null until it saves a profile. */
   profile?: TravelProfile | null;
+  /** Stops retrieved from the profile-driven quest plan. Empty until it lands. */
+  places?: QuestPlace[];
+  isLoadingPlaces?: boolean;
+  placesError?: string | null;
 }
 
 const ACTIVITY_COPY: Record<NonNullable<TravelProfile["activityLevel"]>, string> = {
@@ -27,7 +37,14 @@ function durationCopy(days: number | null): string | null {
   return days === 1 ? "One day" : `${Math.round(days)} days`;
 }
 
-export function TravelPlanCard({ questName, locationLabel, profile }: TravelPlanCardProps) {
+export function TravelPlanCard({
+  questName,
+  locationLabel,
+  profile,
+  places = [],
+  isLoadingPlaces = false,
+  placesError = null,
+}: TravelPlanCardProps) {
   // Only the facts the guide actually captured are shown. The traveler is free
   // to skip any question, so a half-filled profile is a normal outcome, not an
   // excuse to invent the rest.
@@ -86,6 +103,41 @@ export function TravelPlanCard({ questName, locationLabel, profile }: TravelPlan
           <span className="truncate">Still getting acquainted — keep talking to fill this in.</span>
         </div>
       )}
+
+      {/*
+        The stops the plan actually retrieved. Kept below the profile chips
+        because the chips explain why these particular places were chosen.
+      */}
+      {isLoadingPlaces ? (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-[#725452]">
+          <MapPin className="size-3.5 shrink-0 animate-pulse text-[#c67c2e]" />
+          <span className="truncate">Finding places that match your plan…</span>
+        </div>
+      ) : placesError ? (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-[#9c3b43]">
+          <MapPin className="size-3.5 shrink-0" />
+          <span className="truncate">{placesError}</span>
+        </div>
+      ) : places.length > 0 ? (
+        <ul className="chat-scroll mt-2 flex gap-2 overflow-x-auto">
+          {places.map((place) => (
+            <li
+              key={place.name}
+              className="flex w-40 shrink-0 flex-col gap-0.5 rounded-lg border border-[#d5bd94] bg-[#fffaf0] px-2.5 py-1.5"
+            >
+              <span className="flex items-center gap-1 text-[11px] font-bold text-[#31101b]">
+                <MapPin className="size-3 shrink-0 text-[#9c3b43]" />
+                <span className="truncate">{place.name}</span>
+              </span>
+              {place.detail ? (
+                <span className="line-clamp-2 text-[10px] font-medium text-[#725452]">
+                  {place.detail}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }

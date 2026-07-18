@@ -14,19 +14,28 @@
  */
 
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { MossClient } from '@moss-dev/moss';
 import type { DocumentInfo } from '@moss-dev/moss';
 
 // Do not overwrite credentials that were deliberately supplied by the process.
 // Node versions before loadEnvFile() must be launched with Moss credentials set.
+//
+// The path is assembled at runtime rather than written as
+// `new URL('../../.env', import.meta.url)`: webpack statically resolves that
+// form and fails the Next build with "Can't resolve '../../.env'" whenever the
+// file is absent, which took down every route importing this module. Next loads
+// .env.local itself, so in the app this loop finds nothing to do — it exists for
+// the plain-node smoke scripts, which run from the repo root.
 if (!process.env.MOSS_PROJECT_ID || !process.env.MOSS_PROJECT_KEY) {
-  const localEnvPath = fileURLToPath(new URL('../../.env.local', import.meta.url));
-  const envPath = existsSync(localEnvPath)
-    ? localEnvPath
-    : fileURLToPath(new URL('../../.env', import.meta.url));
-  if (existsSync(envPath) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envPath);
+  for (const envFile of ['.env.local', '.env']) {
+    const envPath = join(process.cwd(), envFile);
+    if (existsSync(envPath) && typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile(envPath);
+      break;
+    }
+  }
 }
 
 export interface Document {
