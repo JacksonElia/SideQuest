@@ -5,17 +5,17 @@ import { Home, MapPin, ScrollText } from "lucide-react";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
 import { TravelPlanCard } from "@/components/Plan/TravelPlanCard";
-import { QuestReveal } from "@/components/Quest/QuestReveal";
+import { QuestPlanning } from "@/components/Quest/QuestPlanning";
 import { QuestSetup } from "@/components/Quest/QuestSetup";
 import { QuestWelcome } from "@/components/Quest/QuestWelcome";
 import { VoiceButton } from "@/components/Voice/VoiceButton";
 import { useLocation } from "@/hooks/useLocation";
 import { useRecorder } from "@/hooks/useRecorder";
-import { createAssistantMessage, INITIAL_MESSAGES } from "@/lib/mock-ai";
+import { createAssistantMessage, createPlanningMessages, INITIAL_MESSAGES } from "@/lib/mock-ai";
 import { createId } from "@/lib/utils";
 import type { LocationCoordinates, Message } from "@/types/message";
 
-type QuestScreen = "welcome" | "setup" | "reveal" | "main";
+type QuestScreen = "welcome" | "setup" | "planning" | "main";
 
 interface SavedJourney {
   questName: string;
@@ -35,10 +35,12 @@ export default function HomePage() {
   const [selectedLocation, setSelectedLocation] = useState<LocationCoordinates | null>(null);
   const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
   const timeoutIdsRef = useRef<number[]>([]);
-  const revealTimeoutRef = useRef<number | null>(null);
-  const { location, status: locationStatus, error: locationError, requestLocation } = useLocation(
-    screen === "main" || screen === "setup",
-  );
+  const {
+    location,
+    status: locationStatus,
+    error: locationError,
+    requestLocation,
+  } = useLocation(screen === "main" || screen === "setup");
   const {
     status: recorderStatus,
     durationSeconds,
@@ -94,14 +96,17 @@ export default function HomePage() {
     timeoutIdsRef.current.push(timeoutId);
   }, [persistJourney]);
 
-  const addUserMessage = useCallback((message: Message) => {
-    setMessages((currentMessages) => {
-      const nextMessages = [...currentMessages, message];
-      persistJourney(nextMessages);
-      return nextMessages;
-    });
-    queueAssistantResponse();
-  }, [persistJourney, queueAssistantResponse]);
+  const addUserMessage = useCallback(
+    (message: Message) => {
+      setMessages((currentMessages) => {
+        const nextMessages = [...currentMessages, message];
+        persistJourney(nextMessages);
+        return nextMessages;
+      });
+      queueAssistantResponse();
+    },
+    [persistJourney, queueAssistantResponse],
+  );
 
   useEffect(() => {
     if (!recordingBlob) {
@@ -129,9 +134,6 @@ export default function HomePage() {
   useEffect(() => {
     return () => {
       clearPendingTimeouts();
-      if (revealTimeoutRef.current !== null) {
-        window.clearTimeout(revealTimeoutRef.current);
-      }
     };
   }, [clearPendingTimeouts]);
 
@@ -183,22 +185,22 @@ export default function HomePage() {
   const handleCreateQuest = () => {
     const nextQuestName = QUEST_NAMES[Math.floor(Math.random() * QUEST_NAMES.length)];
     const nextLocationLabel = locationLabel.trim() || "Current location";
+    const planningMessages = createPlanningMessages(nextQuestName, nextLocationLabel);
     setQuestName(nextQuestName);
     setLocationLabel(nextLocationLabel);
-    setMessages(INITIAL_MESSAGES);
-    persistJourney(INITIAL_MESSAGES, nextQuestName, nextLocationLabel);
-    setScreen("reveal");
-    revealTimeoutRef.current = window.setTimeout(() => {
-      setScreen("main");
-      revealTimeoutRef.current = null;
-    }, 3_000);
+    setMessages(planningMessages);
+    persistJourney(planningMessages, nextQuestName, nextLocationLabel);
+    setScreen("planning");
   };
 
-  const handleRevealContinue = () => {
-    if (revealTimeoutRef.current !== null) {
-      window.clearTimeout(revealTimeoutRef.current);
-      revealTimeoutRef.current = null;
-    }
+  const handlePlanningBack = () => {
+    clearPendingTimeouts();
+    setIsTyping(false);
+    setScreen("setup");
+  };
+
+  const handleStartQuest = () => {
+    persistJourney(messages);
     setScreen("main");
   };
 
@@ -234,8 +236,22 @@ export default function HomePage() {
     );
   }
 
-  if (screen === "reveal") {
-    return <QuestReveal questName={questName} onContinue={handleRevealContinue} />;
+  if (screen === "planning") {
+    return (
+      <QuestPlanning
+        questName={questName}
+        locationLabel={locationLabel}
+        messages={messages}
+        isTyping={isTyping}
+        recorderStatus={recorderStatus}
+        durationSeconds={durationSeconds}
+        recorderError={recorderError}
+        onBack={handlePlanningBack}
+        onStartQuest={handleStartQuest}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+      />
+    );
   }
 
   return (
@@ -250,7 +266,9 @@ export default function HomePage() {
               <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#8c6a5f]">
                 SideQuest
               </p>
-              <h1 className="text-base font-semibold tracking-tight text-[#31101b]">Your walking guide</h1>
+              <h1 className="text-base font-semibold tracking-tight text-[#31101b]">
+                Your walking guide
+              </h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -297,7 +315,9 @@ export default function HomePage() {
             <ChatWindow messages={messages} isTyping={isTyping} />
             <div className="border-t border-[#dfceb1] bg-[#fffaf0] px-5 py-4">
               <div className="flex flex-col items-center text-center">
-                <p className="text-xs font-semibold text-[#5c252b]">Talk it through with your guide</p>
+                <p className="text-xs font-semibold text-[#5c252b]">
+                  Talk it through with your guide
+                </p>
                 <p className="mt-1 text-[11px] text-[#8c6a5f]">Tap and speak naturally</p>
                 <div className="mt-3">
                   <VoiceButton

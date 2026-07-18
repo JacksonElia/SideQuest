@@ -2,19 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  LocateFixed,
-  MapPin,
-  RefreshCw,
-  Search,
-} from "lucide-react";
-import type {
-  LocationCoordinates,
-  LocationPermissionStatus,
-} from "@/types/message";
+import { ArrowLeft, ArrowRight, Check, LocateFixed, MapPin, RefreshCw, Search } from "lucide-react";
+import type { LocationCoordinates, LocationPermissionStatus } from "@/types/message";
 import { formatCoordinate, getOpenStreetMapEmbedUrl } from "@/lib/utils";
 
 interface PlaceResult {
@@ -66,11 +55,7 @@ function formatPlace(feature: PhotonFeature): PlaceResult | null {
     return null;
   }
 
-  const detail = [
-    feature.properties?.city,
-    feature.properties?.state,
-    feature.properties?.country,
-  ]
+  const detail = [feature.properties?.city, feature.properties?.state, feature.properties?.country]
     .filter(Boolean)
     .join(", ");
 
@@ -129,7 +114,11 @@ export function QuestSetup({
         }
 
         const data = (await response.json()) as PhotonResponse;
-        setResults((data.features ?? []).map(formatPlace).filter((place): place is PlaceResult => place !== null));
+        setResults(
+          (data.features ?? [])
+            .map(formatPlace)
+            .filter((place): place is PlaceResult => place !== null),
+        );
         setSearchStatus("idle");
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
@@ -170,7 +159,9 @@ export function QuestSetup({
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-1 flex-col pt-10"
         >
-          <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#9c3b43]">Every Quest needs a beginning</p>
+          <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#9c3b43]">
+            Every Quest needs a beginning
+          </p>
           <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-[-0.05em] text-[#31101b]">
             Where should we wander?
           </h1>
@@ -213,7 +204,8 @@ export function QuestSetup({
                 </div>
                 <p className="mt-4 text-sm font-bold text-[#31101b]">Your map will appear here</p>
                 <p className="mt-2 text-xs leading-5 text-[#725452]">
-                  Use your device location or choose one of the search results to open an interactive map.
+                  Use your device location or choose one of the search results to open an
+                  interactive map.
                 </p>
               </div>
             )}
@@ -232,7 +224,9 @@ export function QuestSetup({
                 <LocateFixed className="size-4" />
               </span>
               <span>
-                <span className="block text-xs font-bold text-[#31101b]">Use my current location</span>
+                <span className="block text-xs font-bold text-[#31101b]">
+                  Use my current location
+                </span>
                 <span className="mt-1 block text-[10px] text-[#725452]">
                   {isRequesting
                     ? "Waiting for browser permission..."
@@ -278,7 +272,9 @@ export function QuestSetup({
               aria-label="Search for a starting location"
             />
             {searchStatus === "loading" && (
-              <span className="absolute right-4 top-4 text-[10px] font-bold text-[#8c6a5f]">Searching...</span>
+              <span className="absolute right-4 top-4 text-[10px] font-bold text-[#8c6a5f]">
+                Searching...
+              </span>
             )}
           </div>
 
@@ -299,7 +295,9 @@ export function QuestSetup({
                   </span>
                   <span className="min-w-0">
                     <span className="block text-xs font-bold text-[#31101b]">{place.label}</span>
-                    <span className="mt-1 block truncate text-[10px] text-[#725452]">{place.detail}</span>
+                    <span className="mt-1 block truncate text-[10px] text-[#725452]">
+                      {place.detail}
+                    </span>
                   </span>
                 </button>
               ))}
@@ -322,7 +320,7 @@ export function QuestSetup({
             disabled={!canCreateQuest}
             className="mt-auto flex w-full items-center justify-center gap-2 rounded-lg border-2 border-[#31101b] bg-[#31101b] px-5 py-4 text-sm font-bold text-[#fff8e8] shadow-float transition hover:bg-[#6b1f32] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:border-[#d7c5a7] disabled:bg-[#d7c5a7] disabled:text-[#8c6a5f] disabled:shadow-none"
           >
-            Create my Quest
+            Plan my Quest
             <ArrowRight className="size-4" />
           </button>
         </motion.div>
