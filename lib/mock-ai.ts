@@ -14,6 +14,18 @@ export const INITIAL_MESSAGES: Message[] = [
   },
 ];
 
+export function createPlanningMessages(questName: string, locationLabel: string): Message[] {
+  return [
+    {
+      id: "assistant-plan",
+      role: "assistant",
+      kind: "text",
+      text: `You’re starting in ${locationLabel}. I’ve mapped out ${questName}: a loose route with a good first stop, an unexpected turn, and room to follow your curiosity. Want to make it calmer, weirder, or more food-focused?`,
+      createdAt: new Date().toISOString(),
+    },
+  ];
+}
+
 export function createAssistantMessage(id: string): Message {
   return {
     id,

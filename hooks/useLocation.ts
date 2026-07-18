@@ -19,7 +19,7 @@ const locationOptions: PositionOptions = {
   timeout: 15_000,
 };
 
-export function useLocation(): UseLocationResult {
+export function useLocation(autoRequest = true): UseLocationResult {
   const [location, setLocation] = useState<LocationCoordinates | null>(null);
   const [status, setStatus] = useState<LocationPermissionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -67,9 +67,14 @@ export function useLocation(): UseLocationResult {
   }, [stopWatching]);
 
   useEffect(() => {
+    if (!autoRequest) {
+      stopWatching();
+      return;
+    }
+
     requestLocation();
     return stopWatching;
-  }, [requestLocation, stopWatching]);
+  }, [autoRequest, requestLocation, stopWatching]);
 
   return { location, status, error, requestLocation };
 }

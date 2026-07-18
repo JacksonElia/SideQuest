@@ -44,14 +44,14 @@ export function VoiceButton({
         className={cn(
           "relative flex items-center justify-center text-white shadow-float transition",
           isConversation ? "size-16 rounded-[22px]" : "size-12 rounded-2xl",
-          isListening ? "bg-rose-500 shadow-rose-500/25" : "bg-slate-950 hover:bg-blue-600",
+          isListening ? "bg-[#c67c2e] shadow-[#c67c2e]/25" : "bg-[#31101b] hover:bg-[#6b1f32]",
           isBusy && "cursor-wait opacity-70",
         )}
         aria-label={isListening ? "Stop recording" : "Start voice message"}
       >
         {isListening && (
           <motion.span
-            className="absolute inset-0 rounded-2xl border-2 border-rose-300"
+            className="absolute inset-0 rounded-2xl border-2 border-[#e5b85f]"
             animate={{ scale: [1, 1.18, 1], opacity: [0.8, 0, 0.8] }}
             transition={{ duration: 1.4, repeat: Infinity }}
           />
@@ -65,7 +65,7 @@ export function VoiceButton({
       <span
         className={cn(
           "text-[10px] font-semibold",
-          isListening ? "text-rose-500" : "text-slate-400",
+          isListening ? "text-[#9c3b43]" : "text-[#8c6a5f]",
         )}
       >
         {isListening
@@ -77,7 +77,7 @@ export function VoiceButton({
               : "Voice"}
       </span>
       {error && (
-        <span className="absolute bottom-full left-0 mb-3 w-44 rounded-xl bg-slate-900 px-3 py-2 text-center text-[10px] leading-4 text-white shadow-xl">
+        <span className="absolute bottom-full left-0 mb-3 w-44 rounded-lg bg-[#31101b] px-3 py-2 text-center text-[10px] leading-4 text-[#fff8e8] shadow-xl">
           {error}
         </span>
       )}
