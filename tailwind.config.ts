@@ -34,8 +34,8 @@ const config: Config = {
         },
       },
       boxShadow: {
-        soft: "0 20px 50px -28px rgba(30, 41, 59, 0.28)",
-        float: "0 12px 30px -14px rgba(15, 23, 42, 0.28)",
+        soft: "4px 5px 0 rgba(82, 30, 39, 0.12)",
+        float: "5px 6px 0 rgba(82, 30, 39, 0.18)",
       },
       keyframes: {
         "map-drift": {

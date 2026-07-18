@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Home, MapPin, Sparkles } from "lucide-react";
+import { Home, MapPin, ScrollText } from "lucide-react";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
 import { TravelPlanCard } from "@/components/Plan/TravelPlanCard";
@@ -239,29 +239,29 @@ export default function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100">
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col overflow-hidden bg-[#f8fafc] shadow-2xl shadow-slate-300/30">
+    <main className="min-h-screen bg-[#e9dcc6]">
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col overflow-hidden bg-[#f7f1e5] shadow-[8px_0_0_rgba(82,30,39,0.08)]">
         <header className="safe-top flex items-center justify-between px-5 pb-3 pt-4">
           <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-float">
-              <Sparkles className="size-5" strokeWidth={2.3} />
+            <div className="flex size-10 items-center justify-center rounded-lg border-2 border-[#31101b] bg-[#8a293c] text-[#f5d58a] shadow-float">
+              <ScrollText className="size-5" strokeWidth={2.3} />
             </div>
             <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#8c6a5f]">
                 SideQuest
               </p>
-              <h1 className="text-base font-semibold tracking-tight text-slate-900">Your walking guide</h1>
+              <h1 className="text-base font-semibold tracking-tight text-[#31101b]">Your walking guide</h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
+            <div className="flex items-center gap-1.5 rounded-sm border border-[#c7ac84] bg-[#fffaf0] px-3 py-2 text-xs font-semibold text-[#5c252b] shadow-sm">
+              <span className="size-1.5 rounded-full bg-[#c67c2e]" />
               Exploring
             </div>
             <button
               type="button"
               onClick={handleReturnToStart}
-              className="flex size-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 active:scale-95"
+              className="flex size-9 items-center justify-center rounded-lg border border-[#c7ac84] bg-[#fffaf0] text-[#7a4c4d] shadow-sm transition hover:bg-[#eadfca] hover:text-[#31101b] active:scale-95"
               aria-label="Return to start"
               title="Return to start"
             >
@@ -279,26 +279,26 @@ export default function HomePage() {
           />
           <TravelPlanCard questName={questName} locationLabel={locationLabel} />
 
-          <section className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-soft">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <section className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
+            <div className="flex items-center justify-between border-b border-[#dfceb1] px-5 py-4">
               <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8c6a5f]">
                   Conversation
                 </p>
-                <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+                <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#31101b]">
                   Where should we wander?
                 </h2>
               </div>
-              <div className="flex size-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <div className="flex size-9 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
                 <MapPin className="size-4" />
               </div>
             </div>
 
             <ChatWindow messages={messages} isTyping={isTyping} />
-            <div className="border-t border-slate-100 bg-white px-5 py-4">
+            <div className="border-t border-[#dfceb1] bg-[#fffaf0] px-5 py-4">
               <div className="flex flex-col items-center text-center">
-                <p className="text-xs font-semibold text-slate-600">Talk it through with your guide</p>
-                <p className="mt-1 text-[11px] text-slate-400">Tap and speak naturally</p>
+                <p className="text-xs font-semibold text-[#5c252b]">Talk it through with your guide</p>
+                <p className="mt-1 text-[11px] text-[#8c6a5f]">Tap and speak naturally</p>
                 <div className="mt-3">
                   <VoiceButton
                     variant="conversation"

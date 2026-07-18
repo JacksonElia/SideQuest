@@ -148,18 +148,18 @@ export function QuestSetup({
   }, [searchValue]);
 
   return (
-    <main className="min-h-screen bg-[#f8fafc] text-slate-950">
+    <main className="min-h-screen bg-[#f7f1e5] text-[#31101b]">
       <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-6">
         <header className="flex items-center justify-between">
           <button
             type="button"
             onClick={onBack}
-            className="flex size-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-white active:scale-95"
+            className="flex size-10 items-center justify-center rounded-lg text-[#7a4c4d] transition hover:bg-[#eadfca] active:scale-95"
             aria-label="Go back"
           >
             <ArrowLeft className="size-5" />
           </button>
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8c6a5f]">
             Choose a starting point
           </p>
           <span className="w-10" />
@@ -170,15 +170,15 @@ export function QuestSetup({
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-1 flex-col pt-10"
         >
-          <p className="text-sm font-bold text-emerald-600">Every Quest needs a beginning</p>
-          <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-[-0.05em] text-slate-950">
+          <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#9c3b43]">Every Quest needs a beginning</p>
+          <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-[-0.05em] text-[#31101b]">
             Where should we wander?
           </h1>
-          <p className="mt-4 text-sm leading-6 text-slate-500">
+          <p className="mt-4 text-sm leading-6 text-[#725452]">
             Start wherever you are, or search for a different place for the day.
           </p>
 
-          <div className="relative mt-7 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-soft">
+          <div className="relative mt-7 overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
             {mapLocation ? (
               <>
                 <iframe
@@ -188,31 +188,31 @@ export function QuestSetup({
                   className="h-56 w-full border-0"
                   loading="eager"
                 />
-                <div className="absolute left-4 top-4 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-600 shadow-sm backdrop-blur">
+                <div className="absolute left-4 top-4 rounded-sm bg-[#fffaf0]/95 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#5c252b] shadow-sm">
                   Drag or zoom the map
                 </div>
-                <div className="border-t border-slate-100 bg-white p-3">
+                <div className="border-t border-[#dfceb1] bg-[#fffaf0] p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-slate-800">
+                      <p className="truncate text-xs font-bold text-[#31101b]">
                         {isUsingCurrentLocation ? "Your current location" : locationLabel}
                       </p>
-                      <p className="mt-1 truncate text-[10px] text-slate-500">
+                      <p className="mt-1 truncate text-[10px] text-[#725452]">
                         {formatCoordinate(mapLocation.latitude, "N", "S")} ·{" "}
                         {formatCoordinate(mapLocation.longitude, "E", "W")}
                       </p>
                     </div>
-                    {isUsingCurrentLocation && <Check className="size-5 shrink-0 text-emerald-600" />}
+                    {isUsingCurrentLocation && <Check className="size-5 shrink-0 text-[#9c3b43]" />}
                   </div>
                 </div>
               </>
             ) : (
               <div className="flex h-56 flex-col items-center justify-center px-8 text-center">
-                <div className="flex size-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
+                <div className="flex size-12 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
                   <MapPin className="size-6" />
                 </div>
-                <p className="mt-4 text-sm font-bold text-slate-800">Your map will appear here</p>
-                <p className="mt-2 text-xs leading-5 text-slate-500">
+                <p className="mt-4 text-sm font-bold text-[#31101b]">Your map will appear here</p>
+                <p className="mt-2 text-xs leading-5 text-[#725452]">
                   Use your device location or choose one of the search results to open an interactive map.
                 </p>
               </div>
@@ -225,15 +225,15 @@ export function QuestSetup({
               setSearchQuery("");
               onUseCurrentLocation();
             }}
-            className="mt-4 flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/40 active:scale-[0.98]"
+            className="mt-4 flex w-full items-center justify-between rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-4 py-3.5 text-left shadow-soft transition hover:border-[#9c3b43] hover:bg-[#f6ead3] active:translate-x-0.5 active:translate-y-0.5"
           >
             <span className="flex items-center gap-3">
-              <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+              <span className="flex size-9 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
                 <LocateFixed className="size-4" />
               </span>
               <span>
-                <span className="block text-xs font-bold text-slate-800">Use my current location</span>
-                <span className="mt-1 block text-[10px] text-slate-500">
+                <span className="block text-xs font-bold text-[#31101b]">Use my current location</span>
+                <span className="mt-1 block text-[10px] text-[#725452]">
                   {isRequesting
                     ? "Waiting for browser permission..."
                     : isUsingCurrentLocation && location
@@ -243,14 +243,14 @@ export function QuestSetup({
               </span>
             </span>
             {isUsingCurrentLocation && location ? (
-              <Check className="size-5 text-emerald-600" />
+              <Check className="size-5 text-[#9c3b43]" />
             ) : (
-              <ArrowRight className="size-4 text-slate-400" />
+              <ArrowRight className="size-4 text-[#8c6a5f]" />
             )}
           </button>
 
           {hasLocationError && (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[#d7a599] bg-[#f9e3db] px-3 py-2.5 text-xs text-[#7d2c2f]">
               <p className="leading-5">
                 {locationError || "Location access is unavailable. Search for a place instead."}
               </p>
@@ -269,21 +269,21 @@ export function QuestSetup({
           )}
 
           <div className="relative mt-4">
-            <Search className="pointer-events-none absolute left-4 top-4 size-4 text-slate-400" />
+            <Search className="pointer-events-none absolute left-4 top-4 size-4 text-[#8c6a5f]" />
             <input
               value={searchValue}
               onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Search a city, neighborhood, or landmark"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-11 py-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus-within:ring-blue-100/70"
+              className="w-full rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-11 py-4 text-sm text-[#31101b] outline-none transition placeholder:text-[#9a7b6b] focus:border-[#9c3b43] focus:ring-4 focus-within:ring-[#e8c98b]/50"
               aria-label="Search for a starting location"
             />
             {searchStatus === "loading" && (
-              <span className="absolute right-4 top-4 text-[10px] font-bold text-slate-400">Searching...</span>
+              <span className="absolute right-4 top-4 text-[10px] font-bold text-[#8c6a5f]">Searching...</span>
             )}
           </div>
 
           {!isUsingCurrentLocation && results.length > 0 && (
-            <div className="mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="mt-2 overflow-hidden rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
               {results.map((place) => (
                 <button
                   key={place.id}
@@ -292,14 +292,14 @@ export function QuestSetup({
                     onPlaceSelect(place.label, place.coordinates);
                     setSearchQuery("");
                   }}
-                  className="flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-0 transition hover:bg-slate-50 active:bg-blue-50"
+                  className="flex w-full items-center gap-3 border-b border-[#eadcc5] px-4 py-3 text-left last:border-0 transition hover:bg-[#f6ead3] active:bg-[#ead5aa]"
                 >
-                  <span className="flex size-8 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <span className="flex size-8 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
                     <MapPin className="size-4" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-xs font-bold text-slate-800">{place.label}</span>
-                    <span className="mt-1 block truncate text-[10px] text-slate-500">{place.detail}</span>
+                    <span className="block text-xs font-bold text-[#31101b]">{place.label}</span>
+                    <span className="mt-1 block truncate text-[10px] text-[#725452]">{place.detail}</span>
                   </span>
                 </button>
               ))}
@@ -307,12 +307,12 @@ export function QuestSetup({
           )}
 
           {searchStatus === "error" && (
-            <p className="mt-2 text-xs leading-5 text-rose-600">
+            <p className="mt-2 text-xs leading-5 text-[#9c3b43]">
               Place search is unavailable right now. Please try again or use your current location.
             </p>
           )}
 
-          <p className="mt-3 text-[10px] leading-4 text-slate-400">
+          <p className="mt-3 text-[10px] leading-4 text-[#8c6a5f]">
             Map data © OpenStreetMap contributors. Place search uses Photon by Komoot.
           </p>
 
@@ -320,7 +320,7 @@ export function QuestSetup({
             type="button"
             onClick={onCreateQuest}
             disabled={!canCreateQuest}
-            className="mt-auto flex w-full items-center justify-center gap-2 rounded-[22px] bg-slate-950 px-5 py-4 text-sm font-bold text-white shadow-float transition hover:bg-blue-600 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
+            className="mt-auto flex w-full items-center justify-center gap-2 rounded-lg border-2 border-[#31101b] bg-[#31101b] px-5 py-4 text-sm font-bold text-[#fff8e8] shadow-float transition hover:bg-[#6b1f32] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:border-[#d7c5a7] disabled:bg-[#d7c5a7] disabled:text-[#8c6a5f] disabled:shadow-none"
           >
             Create my Quest
             <ArrowRight className="size-4" />

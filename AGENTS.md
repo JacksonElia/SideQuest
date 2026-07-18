@@ -49,6 +49,7 @@ Unusual: (1) There is NO database — Moss indexes are the only datastore; metad
 ## Frontend currently implemented
 
 - The frontend is a mobile-first Next.js App Router experience in `app/`, with reusable UI grouped under `components/`, browser capability hooks under `hooks/`, typed messages under `types/`, and mock adapters under `lib/`.
+- The product visual language is rugged and playful rather than glossy: use the established deep-maroon, ink, parchment, and trail-gold palette; strong borders; restrained corner rounding; and offset “printed” shadows. Use quest symbols such as scrolls, maps, compasses, flags, and trail markers rather than AI sparkle/star iconography. Do not reintroduce glossy blue gradients, glassmorphism, overly polished floating-card effects, or generic assistant icons.
 - The app opens into a Spotify Wrapped-inspired Quest entry experience in `components/Quest/`: users can start a new Quest, continue a saved Journey, choose current/manual location, see a timed Quest reveal, and then enter the guide.
 - The Quest entry screen appears every time the app opens. `localStorage` stores the current Quest name, starting location label, and serializable conversation state under `sidequest-journey`; this is intentionally a frontend-only resume path.
 - The main guide remains intentionally voice-first. The typed composer, bottom action toolbar, and camera button are removed; the conversation card shows the user/AI message history and a large “Tap to speak” control.
