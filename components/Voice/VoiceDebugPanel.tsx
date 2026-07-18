@@ -1,6 +1,5 @@
 "use client";
 
-import { ConnectionState } from "livekit-client";
 import { cn } from "@/lib/utils";
 import type { VoiceDiagnostics } from "@/hooks/useVoiceSession";
 
@@ -31,7 +30,7 @@ function StatusRow({ label, tone, detail }: { label: string; tone: DotTone; deta
 /**
  * Floating diagnostics card for debugging a silent microphone. Every row is a
  * distinct failure point, ordered by the path audio takes: connection → mic
- * publish → local level → server hears us → agent joins → agent audio back.
+ * publish → local level → server VAD fires → model speaks → tool executed.
  */
 export function VoiceDebugPanel({ diagnostics, isAgentSpeaking = false }: VoiceDebugPanelProps) {
   const {
@@ -43,14 +42,12 @@ export function VoiceDebugPanel({ diagnostics, isAgentSpeaking = false }: VoiceD
     agentPresent,
     agentState,
     agentAudioSubscribed,
-    micTrackMuted,
+    micTrackEnabled,
+    toolExecuted,
   } = diagnostics;
 
-  const connected = connectionState === ConnectionState.Connected;
-  const connecting =
-    connectionState === ConnectionState.Connecting ||
-    connectionState === ConnectionState.Reconnecting ||
-    connectionState === ConnectionState.SignalReconnecting;
+  const connected = connectionState === "connected";
+  const connecting = connectionState === "connecting";
 
   return (
     <div
@@ -70,24 +67,32 @@ export function VoiceDebugPanel({ diagnostics, isAgentSpeaking = false }: VoiceD
       <StatusRow label="Mic published" tone={micPublished ? "good" : connected ? "bad" : "warn"} />
       <StatusRow
         label="Mic track"
-        tone={!micPublished ? "warn" : micTrackMuted ? "bad" : "good"}
-        detail={micTrackMuted ? "muted" : micPublished ? "live" : "—"}
+        tone={!micPublished ? "warn" : micTrackEnabled ? "good" : "bad"}
+        detail={micTrackEnabled ? "live" : micPublished ? "muted" : "—"}
       />
-      <StatusRow label="Agent in room" tone={agentPresent ? "good" : connected ? "bad" : "warn"} />
       <StatusRow
-        label="Agent state"
+        label="Session"
+        tone={agentPresent ? "good" : connected ? "warn" : "bad"}
+        detail={agentPresent ? "open" : "—"}
+      />
+      <StatusRow
+        label="Model"
         tone={
-          agentState === "listening" || agentState === "thinking" || agentState === "speaking"
+          agentState === "thinking" || agentState === "speaking"
             ? "good"
-            : agentState === "initializing" || !agentPresent
+            : agentState === "idle" || !agentPresent
               ? "warn"
               : "bad"
         }
         detail={agentState ?? "—"}
       />
       <StatusRow
-        label="Agent audio"
+        label="Model audio"
         tone={agentAudioSubscribed ? "good" : agentPresent ? "warn" : "bad"}
+      />
+      <StatusRow
+        label="Tool executed"
+        tone={toolExecuted ? "good" : "warn"}
       />
 
       {micDeviceError && (

@@ -3,37 +3,34 @@
 /**
  * The browser half of the voice conversation.
  *
- * Ports the flow proven in public/livekit-test.html: mint a session, join the
- * room, publish the microphone, play the agent back, and keep the agent's idea
- * of the traveler's position current as they walk.
+ * Opens a WebRTC peer connection straight to OpenAI's Realtime API using an
+ * ephemeral client secret minted by POST /api/session. Audio flows over the
+ * peer connection; session control and tool calls flow over a "oai-events"
+ * data channel. Tool execution lives server-side at POST /api/tool because the
+ * browser cannot safely call Moss.
  *
- * One room spans both the planning and active screens on purpose — the agent
+ * One session spans planning and active screens on purpose — the model
  * changes mode by itself, so tearing the connection down between screens would
  * restart the conversation and lose everything it had learned.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ConnectionState,
-  RemoteAudioTrack,
-  Room,
-  RoomEvent,
-  Track,
-  type LocalTrackPublication,
-  type Participant,
-  type RemoteParticipant,
-  type RemoteTrack,
-  type RemoteTrackPublication,
-  type TrackPublication,
-} from "livekit-client";
-import {
-  encodeLocationAttributes,
-  shouldPublishFix,
-  type TimedFix,
-} from "@/lib/server/location";
+
 import type { LocationCoordinates, Message, TravelProfile } from "@/types/message";
 
 export type VoiceStatus = "idle" | "connecting" | "connected" | "error";
+
+/**
+ * Coarse RTCPeerConnection states, expressed as strings so we don't import
+ * the livekit-client enum. Anything not "connected" reads as a problem.
+ */
+export type RealtimeConnectionState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "failed"
+  | "closed";
 
 /**
  * Fine-grained signals for debugging a silent microphone. `status` collapses
@@ -42,32 +39,34 @@ export type VoiceStatus = "idle" | "connecting" | "connected" | "error";
  * never joined" from "the server hears nothing".
  */
 export interface VoiceDiagnostics {
-  /** Live LiveKit connection state, more granular than `status`. */
-  connectionState: ConnectionState;
-  /** True once a local microphone track is actually published to the room. */
+  /** Plain-string mirror of the RTCPeerConnection.connectionState. */
+  connectionState: RealtimeConnectionState;
+  /** True once the microphone track is added to the peer connection. */
   micPublished: boolean;
   /** getUserMedia-level failure, e.g. "NotAllowedError: Permission denied". */
   micDeviceError: string | null;
   /** Local input RMS, 0..1, sampled ~10x/s. Moving means the mic hardware works. */
   micLevel: number;
-  /** True while the server counts US among active speakers — proof audio arrives. */
+  /** True while server-side VAD counts the user as speaking — proof audio arrives. */
   userSpeaking: boolean;
-  /** True while any remote participant (the agent worker) is in the room. */
+  /** True once the data channel is open and session.update has been sent. */
   agentPresent: boolean;
   /**
-   * The worker's own pipeline state (lk.agent.state attribute): initializing,
-   * listening, thinking, or speaking. Stuck on "thinking" means the LLM/TTS leg
-   * is failing; never leaving "listening" means our turn never commits.
+   * The model's pipeline state: idle, thinking, or speaking. Stuck on
+   * "thinking" means the LLM leg is failing; never leaving "idle" means our
+   * turn never commits.
    */
-  agentState: string | null;
-  /** True once we've subscribed to a remote audio track. */
+  agentState: "idle" | "thinking" | "speaking" | null;
+  /** True once we've received the first response.audio.delta from the model. */
   agentAudioSubscribed: boolean;
-  /** The published track's own muted flag, distinct from user-intent `isMuted`. */
-  micTrackMuted: boolean;
+  /** The published track's enabled flag, distinct from user-intent `isMuted`. */
+  micTrackEnabled: boolean;
+  /** True once /api/tool returned successfully for at least one call. */
+  toolExecuted: boolean;
 }
 
 const INITIAL_DIAGNOSTICS: VoiceDiagnostics = {
-  connectionState: ConnectionState.Disconnected,
+  connectionState: "idle",
   micPublished: false,
   micDeviceError: null,
   micLevel: 0,
@@ -75,22 +74,42 @@ const INITIAL_DIAGNOSTICS: VoiceDiagnostics = {
   agentPresent: false,
   agentState: null,
   agentAudioSubscribed: false,
-  micTrackMuted: false,
+  micTrackEnabled: true,
+  toolExecuted: false,
 };
 
 interface SessionResponse {
-  serverUrl: string;
-  roomName: string;
-  identity: string;
-  token: string;
-  agentDispatched: boolean;
-  dispatchError: string | null;
+  clientSecret: string;
+  expiresAt: number | null;
+  model: string;
+  voice: string;
+  sessionUpdate: Record<string, unknown>;
+  initialLocation: { lat: number; lng: number; accuracy: number | null; ts: number };
 }
+
+interface ToolCallRequest {
+  name: string;
+  call_id: string;
+  arguments: Record<string, unknown>;
+  lat: number;
+  lng: number;
+  accuracy: number | null;
+}
+
+interface ToolCallResponse {
+  call_id: string;
+  output: Record<string, unknown>;
+}
+
+const REALTIME_OFFER_URL_BASE = "https://api.openai.com/v1/realtime";
+const DATA_CHANNEL_LABEL = "oai-events";
+/** 24 kHz mono PCM16 — matches what OpenAI Realtime emits on the wire. */
+const OUTPUT_SAMPLE_RATE = 24_000;
 
 interface UseVoiceSessionResult {
   status: VoiceStatus;
   error: string | null;
-  /** False when the room is live but no agent was dispatched into it. */
+  /** Always true in the OpenAI Realtime path; kept for the page's degraded-mode UI. */
   agentDispatched: boolean;
   isMuted: boolean;
   isAgentSpeaking: boolean;
@@ -103,38 +122,26 @@ interface UseVoiceSessionResult {
   sendText: (text: string) => Promise<void>;
 }
 
-const TRANSCRIPTION_TOPIC = "lk.transcription";
-const CHAT_TOPIC = "lk.chat";
-const PROFILE_TOPIC = "sidequest.profile";
-
-function toTimedFix(location: LocationCoordinates): TimedFix {
-  return {
-    lat: location.latitude,
-    lng: location.longitude,
-    accuracy: location.accuracy,
-    ts: Date.now(),
-  };
-}
-
 export function useVoiceSession(location: LocationCoordinates | null): UseVoiceSessionResult {
   const [status, setStatus] = useState<VoiceStatus>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [agentDispatched, setAgentDispatched] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
   const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(INITIAL_DIAGNOSTICS);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [profile, setProfile] = useState<TravelProfile | null>(null);
+  const [profile] = useState<TravelProfile | null>(null);
 
-  const roomRef = useRef<Room | null>(null);
-  const localIdentityRef = useRef<string | null>(null);
-  const lastPublishedRef = useRef<TimedFix | null>(null);
-  const audioElementsRef = useRef<HTMLAudioElement[]>([]);
-  /** Guards against a second connect racing the first (double tap, StrictMode). */
-  const connectingRef = useRef(false);
-  // Level-meter plumbing: torn down together whenever the room goes away.
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const localTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const outputContextRef = useRef<AudioContext | null>(null);
+  const outputQueueRef = useRef<AudioBufferSourceNode[]>([]);
+  const nextPlayTimeRef = useRef<number>(0);
+  const connectingRef = useRef(false);
   const levelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentLocationRef = useRef<ToolCallRequest | null>(null);
 
   const patchDiagnostics = useCallback((patch: Partial<VoiceDiagnostics>) => {
     setDiagnostics((current) => ({ ...current, ...patch }));
@@ -150,7 +157,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   }, []);
 
   /**
-   * Tap the published mic track with a Web Audio analyser so the UI can show
+   * Tap the local mic track with a Web Audio analyser so the UI can show
    * real input energy — the one signal that distinguishes "browser is capturing
    * audio" from "track exists but is silent".
    */
@@ -158,8 +165,6 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     (mediaStreamTrack: MediaStreamTrack) => {
       stopLevelMeter();
       const audioContext = new AudioContext();
-      // New contexts can start "suspended"; connect began with a tap, so the
-      // browser allows resuming here.
       void audioContext.resume().catch(() => {});
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
@@ -169,7 +174,6 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
       audioContextRef.current = audioContext;
 
       const samples = new Uint8Array(analyser.fftSize);
-      // An interval, not rAF, so the meter keeps running in background tabs.
       levelIntervalRef.current = setInterval(() => {
         analyser.getByteTimeDomainData(samples);
         let sum = 0;
@@ -177,7 +181,6 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           const centered = (samples[i] - 128) / 128;
           sum += centered * centered;
         }
-        // Speech RMS rarely exceeds ~0.25, so boost it into a readable 0..1.
         const level = Math.min(1, Math.sqrt(sum / samples.length) * 4);
         setDiagnostics((current) =>
           current.micLevel === level ? current : { ...current, micLevel: level },
@@ -187,11 +190,9 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     [stopLevelMeter],
   );
 
-  // Read inside callbacks without making them depend on every position update.
   const locationRef = useRef(location);
   locationRef.current = location;
 
-  /** Insert a message, or replace the existing one with the same id. */
   const upsertMessage = useCallback((message: Message) => {
     setMessages((current) => {
       const index = current.findIndex((existing) => existing.id === message.id);
@@ -203,30 +204,276 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   }, []);
 
   const teardownAudio = useCallback(() => {
-    audioElementsRef.current.forEach((element) => {
-      element.pause();
-      element.remove();
+    outputQueueRef.current.forEach((node) => {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped.
+      }
     });
-    audioElementsRef.current = [];
+    outputQueueRef.current = [];
+    nextPlayTimeRef.current = 0;
+    void outputContextRef.current?.close().catch(() => {});
+    outputContextRef.current = null;
   }, []);
 
   const disconnect = useCallback(async () => {
-    const room = roomRef.current;
-    roomRef.current = null;
-    localIdentityRef.current = null;
-    lastPublishedRef.current = null;
+    const pc = pcRef.current;
+    pcRef.current = null;
+    dataChannelRef.current = null;
     connectingRef.current = false;
     teardownAudio();
     stopLevelMeter();
+
+    localTrackRef.current?.stop();
+    localTrackRef.current = null;
+    void localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
+
+    if (pc) {
+      pc.getSenders().forEach((sender) => sender.track && pc.removeTrack(sender));
+      pc.close();
+    }
+
     setStatus("idle");
     setIsAgentSpeaking(false);
     setIsMuted(false);
     setDiagnostics(INITIAL_DIAGNOSTICS);
-    await room?.disconnect();
   }, [stopLevelMeter, teardownAudio]);
 
+  /**
+   * Decode a single OpenAI audio.delta chunk and queue it for playback.
+   * Chunks arrive as base64-encoded PCM16 mono at OUTPUT_SAMPLE_RATE.
+   */
+  const queueAudioChunk = useCallback((base64: string) => {
+    if (!outputContextRef.current) {
+      outputContextRef.current = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+      void outputContextRef.current.resume().catch(() => {});
+    }
+    const ctx = outputContextRef.current;
+    if (!ctx) return;
+
+    const binary = atob(base64);
+    const bytes = new Int16Array(binary.length / 2);
+    for (let i = 0; i < bytes.length; i += 1) {
+      // Little-endian PCM16.
+      const low = binary.charCodeAt(i * 2);
+      const high = binary.charCodeAt(i * 2 + 1);
+      bytes[i] = (high << 8) | low;
+    }
+    const buffer = ctx.createBuffer(1, bytes.length, OUTPUT_SAMPLE_RATE);
+    buffer.copyToChannel(bytes, 0);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    // Gapless scheduling: each chunk starts where the last one will end. If
+    // the queue has fallen behind, jump straight to "now" so the user doesn't
+    // hear buffered-up audio burst out at once.
+    const now = ctx.currentTime;
+    const startAt = Math.max(now, nextPlayTimeRef.current);
+    source.start(startAt);
+    nextPlayTimeRef.current = startAt + buffer.duration;
+    outputQueueRef.current.push(source);
+    source.onended = () => {
+      const idx = outputQueueRef.current.indexOf(source);
+      if (idx >= 0) outputQueueRef.current.splice(idx, 1);
+    };
+  }, []);
+
+  /**
+   * Execute a tool call the model emitted.
+   *
+   * The browser can't safely call Moss (no server-side index, no fail-soft
+   * contract) so we proxy through /api/tool. The result is fed back as a
+   * `function_call_output` conversation item and a fresh `response.create` is
+   * sent so the model continues.
+   */
+  const executeToolCall = useCallback(
+    async (name: string, callId: string, rawArguments: string) => {
+      const fix = currentLocationRef.current;
+      if (!fix) {
+        sendOnDataChannel({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify({
+              error: "Location not available yet; ask the traveler to enable location.",
+            }),
+          },
+        });
+        sendOnDataChannel({ type: "response.create" });
+        return;
+      }
+
+      let parsedArgs: Record<string, unknown>;
+      try {
+        parsedArgs = JSON.parse(rawArguments) as Record<string, unknown>;
+      } catch {
+        sendOnDataChannel({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify({ error: "Tool arguments were not valid JSON." }),
+          },
+        });
+        sendOnDataChannel({ type: "response.create" });
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/tool", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name,
+            call_id: callId,
+            arguments: parsedArgs,
+            lat: fix.lat,
+            lng: fix.lng,
+            accuracy: fix.accuracy,
+          }),
+        });
+        const result = (await response.json()) as ToolCallResponse | { error: string };
+        if (!response.ok || !("call_id" in result)) {
+          const message = "error" in result ? result.error : `HTTP ${response.status}`;
+          throw new Error(message);
+        }
+        patchDiagnostics({ toolExecuted: true });
+        sendOnDataChannel({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: result.call_id,
+            output: JSON.stringify(result.output),
+          },
+        });
+        sendOnDataChannel({ type: "response.create" });
+      } catch (err) {
+        sendOnDataChannel({
+          type: "conversation.item.create",
+          item: {
+            type: "function_call_output",
+            call_id: callId,
+            output: JSON.stringify({
+              error: err instanceof Error ? err.message : "Tool execution failed.",
+            }),
+          },
+        });
+        sendOnDataChannel({ type: "response.create" });
+      }
+    },
+    [patchDiagnostics],
+  );
+
+  /**
+   * Dispatch a typed Realtime event onto the data channel. No-op if the
+   * channel isn't open yet — race between data-channel-open and connect()
+   * shouldn't double-fire session.update.
+   */
+  const sendOnDataChannel = useCallback((event: Record<string, unknown>) => {
+    const channel = dataChannelRef.current;
+    if (!channel || channel.readyState !== "open") return;
+    channel.send(JSON.stringify(event));
+  }, []);
+
+  const handleRealtimeEvent = useCallback(
+    (event: Record<string, unknown>) => {
+      const type = event.type;
+      if (typeof type !== "string") return;
+
+      switch (type) {
+        case "input_audio_buffer.speech_started":
+          patchDiagnostics({ userSpeaking: true });
+          break;
+        case "input_audio_buffer.speech_stopped":
+          patchDiagnostics({ userSpeaking: false });
+          break;
+        case "conversation.item.input_audio_transcription.completed": {
+          const transcript = event.transcript;
+          if (typeof transcript === "string" && transcript.trim()) {
+            upsertMessage({
+              id: `user-${String(event.item_id ?? Date.now())}`,
+              role: "user",
+              kind: "text",
+              text: transcript.trim(),
+              createdAt: new Date().toISOString(),
+            });
+          }
+          break;
+        }
+        case "response.created":
+          patchDiagnostics({ agentState: "thinking" });
+          setIsAgentSpeaking(false);
+          break;
+        case "response.output_item.added":
+          patchDiagnostics({ agentState: "speaking" });
+          setIsAgentSpeaking(true);
+          break;
+        case "response.audio.delta": {
+          const delta = event.delta;
+          if (typeof delta === "string") {
+            queueAudioChunk(delta);
+            patchDiagnostics({ agentAudioSubscribed: true });
+          }
+          break;
+        }
+        case "response.audio_transcript.delta": {
+          const delta = event.delta;
+          if (typeof delta === "string" && delta.length > 0) {
+            upsertMessage({
+              id: `assistant-stream-${String(event.response_id ?? "live")}`,
+              role: "assistant",
+              kind: "text",
+              text: delta,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          break;
+        }
+        case "response.audio_transcript.done": {
+          const transcript = event.transcript;
+          if (typeof transcript === "string" && transcript.trim()) {
+            upsertMessage({
+              id: `assistant-${String(event.response_id ?? Date.now())}`,
+              role: "assistant",
+              kind: "text",
+              text: transcript.trim(),
+              createdAt: new Date().toISOString(),
+            });
+          }
+          break;
+        }
+        case "response.function_call_arguments.done": {
+          const name = event.name;
+          const callId = event.call_id;
+          const args = event.arguments;
+          if (typeof name === "string" && typeof callId === "string" && typeof args === "string") {
+            void executeToolCall(name, callId, args);
+          }
+          break;
+        }
+        case "response.done":
+          patchDiagnostics({ agentState: "idle" });
+          setIsAgentSpeaking(false);
+          break;
+        case "error":
+          console.error("[realtime error]", event);
+          break;
+        default:
+          // Many event types stream past (rate_limits.updated, response.content_part.added, etc.) —
+          // we only act on the ones we care about above.
+          break;
+      }
+    },
+    [executeToolCall, patchDiagnostics, queueAudioChunk, upsertMessage],
+  );
+
   const connect = useCallback(async () => {
-    if (roomRef.current || connectingRef.current) return;
+    if (pcRef.current || connectingRef.current) return;
 
     const fix = locationRef.current;
     if (!fix) {
@@ -250,11 +497,12 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           accuracy: fix.accuracy,
         }),
       });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      const payload = (await response.json()) as SessionResponse | { error: string };
+      if (!response.ok || !("clientSecret" in payload)) {
+        const message = "error" in payload ? payload.error : `HTTP ${response.status}`;
+        throw new Error(message);
       }
-      session = payload as SessionResponse;
+      session = payload;
     } catch (err) {
       connectingRef.current = false;
       setStatus("error");
@@ -264,189 +512,156 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
       return;
     }
 
-    setAgentDispatched(session.agentDispatched);
-
-    const room = new Room({ adaptiveStream: true, dynacast: true });
-
-    room.on(
-      RoomEvent.TrackSubscribed,
-      (track: RemoteTrack, _publication: RemoteTrackPublication, _participant: RemoteParticipant) => {
-        if (track.kind !== Track.Kind.Audio || !(track instanceof RemoteAudioTrack)) return;
-        // Attaching to a detached element is enough for playback; it never
-        // needs to enter the React tree.
-        const element = track.attach();
-        audioElementsRef.current.push(element as HTMLAudioElement);
-        patchDiagnostics({ agentAudioSubscribed: true });
-      },
-    );
-
-    room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-      setIsAgentSpeaking(
-        speakers.some((speaker) => speaker.identity !== localIdentityRef.current),
-      );
-      // The server only lists speakers whose audio it is actually receiving, so
-      // this going true is end-to-end proof the mic pipeline works.
-      patchDiagnostics({
-        userSpeaking: speakers.some(
-          (speaker) => speaker.identity === localIdentityRef.current,
-        ),
-      });
-    });
-
-    room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
-      patchDiagnostics({ connectionState: state });
-    });
-
-    room.on(RoomEvent.MediaDevicesError, (mediaError: Error) => {
-      // Keep the name: NotAllowedError (permission denied) reads very
-      // differently from NotFoundError (no device at all).
-      patchDiagnostics({ micDeviceError: `${mediaError.name}: ${mediaError.message}` });
-    });
-
-    room.on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
-      if (publication.source !== Track.Source.Microphone) return;
-      patchDiagnostics({ micPublished: true, micTrackMuted: publication.isMuted });
-      const mediaStreamTrack = publication.track?.mediaStreamTrack;
-      if (mediaStreamTrack) startLevelMeter(mediaStreamTrack);
-    });
-
-    const syncAgentPresence = () => {
-      patchDiagnostics({ agentPresent: room.remoteParticipants.size > 0 });
+    currentLocationRef.current = {
+      name: "",
+      call_id: "",
+      arguments: {},
+      lat: fix.latitude,
+      lng: fix.longitude,
+      accuracy: fix.accuracy,
     };
-    room.on(RoomEvent.ParticipantConnected, syncAgentPresence);
-    room.on(RoomEvent.ParticipantDisconnected, syncAgentPresence);
 
-    // The worker publishes its pipeline position (listening/thinking/speaking)
-    // as an attribute, which is the closest thing to a heartbeat it has.
-    room.on(RoomEvent.ParticipantAttributesChanged, (_changed, participant) => {
-      if (participant.isLocal) return;
-      const state = participant.attributes["lk.agent.state"];
-      if (state) patchDiagnostics({ agentState: state });
-    });
-
-    const syncMicMuted = (muted: boolean) => (publication: TrackPublication, participant: Participant) => {
-      if (!participant.isLocal || publication.source !== Track.Source.Microphone) return;
-      patchDiagnostics({ micTrackMuted: muted });
-    };
-    room.on(RoomEvent.TrackMuted, syncMicMuted(true));
-    room.on(RoomEvent.TrackUnmuted, syncMicMuted(false));
-
-    room.on(RoomEvent.Disconnected, () => {
-      roomRef.current = null;
-      connectingRef.current = false;
-      teardownAudio();
-      stopLevelMeter();
-      setStatus("idle");
-      setIsAgentSpeaking(false);
-      setDiagnostics(INITIAL_DIAGNOSTICS);
-    });
-
-    // Handlers are registered before connect so nothing published during the
-    // agent's opening turn is missed.
-    room.registerTextStreamHandler(TRANSCRIPTION_TOPIC, async (reader, participantInfo) => {
-      const attributes = reader.info.attributes ?? {};
-      // Keyed by segment so a re-sent segment replaces its earlier text rather
-      // than appending a duplicate line.
-      const segmentId = attributes["lk.segment_id"] ?? reader.info.id;
-
-      // Deliberately NOT gated on `lk.transcription_final`: with synchronized
-      // transcription the agent's own speech streams are marked "false" for
-      // their whole lifetime, so waiting for a final marker drops every line the
-      // guide says. readAll() resolves only when the stream closes, which is the
-      // real completion signal.
-      const text = await reader.readAll();
-      if (!text.trim()) return;
-
-      upsertMessage({
-        id: `transcript-${segmentId}`,
-        role: participantInfo.identity === localIdentityRef.current ? "user" : "assistant",
-        kind: "text",
-        text,
-        createdAt: new Date().toISOString(),
-      });
-    });
-
-    room.registerTextStreamHandler(PROFILE_TOPIC, async (reader) => {
-      try {
-        setProfile(JSON.parse(await reader.readAll()) as TravelProfile);
-      } catch {
-        // A malformed plan payload costs a card, not the conversation.
-      }
-    });
-
+    let stream: MediaStream;
     try {
-      await room.connect(session.serverUrl, session.token);
-      await room.localParticipant.setMicrophoneEnabled(true);
-
-      // setMicrophoneEnabled resolves even in the cases where no track ends up
-      // published (a device grabbed by another tab, a permission that resolves
-      // to an empty device list). Without this the UI says "Listening" over a
-      // microphone the guide can never hear.
-      const micTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone);
-      if (!micTrack?.track) {
-        throw new Error(
-          "Your microphone did not publish. Check that no other app or tab is using it, then try again.",
-        );
-      }
-
-      // Belt-and-braces alongside LocalTrackPublished: the event can fire
-      // before our listener in some paths, so sync from the publication itself.
-      const remoteAgent = room.remoteParticipants.values().next().value;
-      patchDiagnostics({
-        connectionState: room.state,
-        micPublished: true,
-        micTrackMuted: micTrack.isMuted,
-        agentPresent: room.remoteParticipants.size > 0,
-        agentState: remoteAgent?.attributes["lk.agent.state"] ?? null,
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      if (!audioContextRef.current) {
-        startLevelMeter(micTrack.track.mediaStreamTrack);
-      }
     } catch (err) {
       connectingRef.current = false;
-      await room.disconnect();
-      stopLevelMeter();
-      // The Disconnected reset above wipes diagnostics, but a getUserMedia
-      // failure is exactly what the debug panel exists to show — keep it.
-      if (err instanceof DOMException) {
-        patchDiagnostics({ micDeviceError: `${err.name}: ${err.message}` });
-      }
+      patchDiagnostics({
+        micDeviceError: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+      });
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Could not connect to your guide.");
+      setError(err instanceof Error ? err.message : "Could not access the microphone.");
       return;
     }
 
-    roomRef.current = room;
-    localIdentityRef.current = session.identity;
-    // The token already carries this fix, so the agent is never location-blind
-    // on its opening turn.
-    lastPublishedRef.current = toTimedFix(fix);
+    const [track] = stream.getAudioTracks();
+    if (!track) {
+      connectingRef.current = false;
+      stream.getTracks().forEach((t) => t.stop());
+      setStatus("error");
+      setError("Your microphone did not produce an audio track.");
+      return;
+    }
+
+    localStreamRef.current = stream;
+    localTrackRef.current = track;
+    patchDiagnostics({ micPublished: true, micTrackEnabled: track.enabled });
+    startLevelMeter(track);
+
+    const pc = new RTCPeerConnection();
+    pcRef.current = pc;
+
+    pc.addTrack(track, stream);
+
+    const dataChannel = pc.createDataChannel(DATA_CHANNEL_LABEL);
+    dataChannelRef.current = dataChannel;
+    dataChannel.addEventListener("open", () => {
+      patchDiagnostics({ agentPresent: true });
+      sendOnDataChannel(session.sessionUpdate);
+    });
+    dataChannel.addEventListener("message", (ev) => {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(typeof ev.data === "string" ? ev.data : "{}") as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      handleRealtimeEvent(parsed);
+    });
+    dataChannel.addEventListener("close", () => {
+      patchDiagnostics({ agentPresent: false });
+    });
+
+    pc.addEventListener("connectionstatechange", () => {
+      const state = pc.connectionState as RealtimeConnectionState;
+      patchDiagnostics({ connectionState: state });
+      if (state === "failed" || state === "closed" || state === "disconnected") {
+        setStatus("error");
+      }
+    });
+
+    let offer: RTCSessionDescriptionInit;
+    try {
+      offer = await pc.createOffer({ offerToReceiveAudio: true });
+      await pc.setLocalDescription(offer);
+    } catch (err) {
+      connectingRef.current = false;
+      await pc.close();
+      pcRef.current = null;
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Could not start the WebRTC offer.");
+      return;
+    }
+
+    let answerSdp: string;
+    try {
+      const response = await fetch(
+        `${REALTIME_OFFER_URL_BASE}?model=${encodeURIComponent(session.model)}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.clientSecret}`,
+            "Content-Type": "application/sdp",
+          },
+          body: offer.sdp ?? "",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`OpenAI Realtime rejected the offer (HTTP ${response.status})`);
+      }
+      answerSdp = await response.text();
+    } catch (err) {
+      connectingRef.current = false;
+      pc.getSenders().forEach((sender) => sender.track && pc.removeTrack(sender));
+      pc.close();
+      pcRef.current = null;
+      stream.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+      localTrackRef.current = null;
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Could not reach the Realtime service.");
+      return;
+    }
+
+    try {
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch (err) {
+      connectingRef.current = false;
+      pc.close();
+      pcRef.current = null;
+      stream.getTracks().forEach((t) => t.stop());
+      localStreamRef.current = null;
+      localTrackRef.current = null;
+      setStatus("error");
+      setError(err instanceof Error ? err.message : "Could not complete the Realtime handshake.");
+      return;
+    }
+
     connectingRef.current = false;
     setIsMuted(false);
     setStatus("connected");
-  }, [patchDiagnostics, startLevelMeter, stopLevelMeter, teardownAudio, upsertMessage]);
+  }, [handleRealtimeEvent, patchDiagnostics, sendOnDataChannel, startLevelMeter]);
 
   const toggleMute = useCallback(async () => {
-    const room = roomRef.current;
-    if (!room) return;
-    const nextEnabled = !room.localParticipant.isMicrophoneEnabled;
-    await room.localParticipant.setMicrophoneEnabled(nextEnabled);
-    setIsMuted(!nextEnabled);
-  }, []);
+    const track = localTrackRef.current;
+    if (!track) return;
+    track.enabled = !track.enabled;
+    patchDiagnostics({ micTrackEnabled: track.enabled });
+    setIsMuted(!track.enabled);
+  }, [patchDiagnostics]);
 
   const sendText = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       if (!trimmed) return;
 
-      if (!roomRef.current) {
+      if (!pcRef.current) {
         await connect();
       }
-      const room = roomRef.current;
-      if (!room) return;
+      if (!dataChannelRef.current || dataChannelRef.current.readyState !== "open") return;
 
-      // Echo locally: the agent transcribes speech, but typed input comes back
-      // only as the reply, so without this the traveler's own line never appears.
       upsertMessage({
         id: `typed-${Date.now()}`,
         role: "user",
@@ -455,45 +670,45 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
         createdAt: new Date().toISOString(),
       });
 
-      await room.localParticipant.sendText(trimmed, { topic: CHAT_TOPIC });
+      // Feed the typed message into the conversation as a user turn and let
+      // the model produce a response — same path a spoken turn takes.
+      sendOnDataChannel({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: trimmed }],
+        },
+      });
+      sendOnDataChannel({ type: "response.create" });
     },
-    [connect, upsertMessage],
+    [connect, sendOnDataChannel, upsertMessage],
   );
 
-  /**
-   * Republish position as the traveler walks.
-   *
-   * Gated by the same time-and-distance rule the server uses, because LiveKit
-   * documents attributes as unsuitable for high-frequency updates and
-   * watchPosition fires several times a second.
-   */
   useEffect(() => {
-    const room = roomRef.current;
-    if (!room || status !== "connected" || !location) return;
-
-    const next = toTimedFix(location);
-    if (!shouldPublishFix(lastPublishedRef.current, next)) return;
-
-    lastPublishedRef.current = next;
-    void room.localParticipant.setAttributes(encodeLocationAttributes(next)).catch(() => {
-      // Almost always a missing canUpdateOwnMetadata grant. The guide keeps the
-      // last good fix, so this degrades rather than breaks.
-    });
-  }, [location, status]);
+    const fix = locationRef.current;
+    if (!fix) return;
+    currentLocationRef.current = {
+      name: "",
+      call_id: "",
+      arguments: {},
+      lat: fix.latitude,
+      lng: fix.longitude,
+      accuracy: fix.accuracy,
+    };
+  }, [location]);
 
   useEffect(() => {
     return () => {
-      void roomRef.current?.disconnect();
-      roomRef.current = null;
-      stopLevelMeter();
+      void disconnect();
     };
-  }, [stopLevelMeter]);
+  }, [disconnect]);
 
   return useMemo(
     () => ({
       status,
       error,
-      agentDispatched,
+      agentDispatched: true,
       isMuted,
       isAgentSpeaking,
       diagnostics,
@@ -507,7 +722,6 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     [
       status,
       error,
-      agentDispatched,
       isMuted,
       isAgentSpeaking,
       diagnostics,
