@@ -30,7 +30,7 @@ export function QuestSetup({
   onBack,
   onCreateQuest,
 }: QuestSetupProps) {
-  const mapLocation = isUsingCurrentLocation ? location : selectedLocation;
+  const mapLocation = selectedLocation ?? location;
   const canCreateQuest = Boolean(locationLabel.trim() && mapLocation);
   const hasLocationError =
     locationStatus === "denied" || locationStatus === "error" || locationStatus === "unsupported";
@@ -87,7 +87,8 @@ export function QuestSetup({
             Where should we wander?
           </h1>
           <p className="mt-2 shrink-0 text-sm leading-6 text-[#725452]">
-            We&apos;ll start from right where you are.
+            We&apos;ll try your phone&apos;s location, or start from San Francisco if it&apos;s
+            unavailable.
           </p>
 
           {/* The map takes the leftover height instead of a fixed one, so the

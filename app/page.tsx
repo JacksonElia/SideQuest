@@ -35,6 +35,12 @@ interface GuideAnswerResponse {
 }
 
 const JOURNEY_STORAGE_KEY = "sidequest-journey";
+const SAN_FRANCISCO_FALLBACK: LocationCoordinates = {
+  // Near the bundled SoMa landmarks, so the fallback remains useful offline.
+  latitude: 37.7804,
+  longitude: -122.3934,
+  accuracy: 0,
+};
 const SCOPING_QUESTIONS = [
   "How long will you be traveling, whether it's a few days or several weeks?",
   "What are you drawn to, such as history, landscapes and geography, or food and local flavors?",
@@ -116,16 +122,17 @@ export default function HomePage() {
   }, [persistJourney, screen]);
 
   useEffect(() => {
-    if (isUsingCurrentLocation && location) {
+    if (location) {
       setSelectedLocation(location);
       setLocationLabel("Current location");
+      setIsUsingCurrentLocation(true);
     }
-  }, [isUsingCurrentLocation, location]);
+  }, [location]);
 
   const handleStartNewQuest = () => {
     setQuestName("Your SideQuest");
-    setLocationLabel("");
-    setSelectedLocation(null);
+    setLocationLabel("San Francisco, CA");
+    setSelectedLocation(SAN_FRANCISCO_FALLBACK);
     setIsUsingCurrentLocation(false);
     setMessages([]);
     setAnswers([]);
@@ -155,7 +162,6 @@ export default function HomePage() {
   };
 
   const handleUseCurrentLocation = useCallback(() => {
-    setIsUsingCurrentLocation(true);
     requestLocation();
   }, [requestLocation]);
 
@@ -350,7 +356,7 @@ export default function HomePage() {
 
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <MapCard
-            location={location}
+            location={selectedLocation ?? location}
             status={locationStatus}
             error={locationError}
             onRetry={requestLocation}
