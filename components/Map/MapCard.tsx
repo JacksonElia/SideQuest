@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { LocateFixed, MapPin, RefreshCw } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import { cn, formatCoordinate, getOpenStreetMapEmbedUrl } from "@/lib/utils";
 import type {
   LocationCoordinates,
@@ -29,8 +30,8 @@ export function MapCard({ location, status, error, onRetry }: MapCardProps) {
   const hasProblem = status === "denied" || status === "error" || status === "unsupported";
 
   return (
-    <section className="relative overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
-      <div className="relative h-44 overflow-hidden bg-[#eadfca]">
+    <section className="relative shrink-0 overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
+      <div className="relative h-24 overflow-hidden bg-[#eadfca] sm:h-32">
         {location ? (
           <>
             <iframe
@@ -48,57 +49,58 @@ export function MapCard({ location, status, error, onRetry }: MapCardProps) {
             <motion.div
               animate={isLoading ? { scale: [1, 1.2, 1], opacity: [0.65, 1, 0.65] } : undefined}
               transition={{ duration: 1.4, repeat: isLoading ? Infinity : 0 }}
-              className="flex size-14 items-center justify-center rounded-full bg-[#9c3b43]/15"
+              className="flex size-10 items-center justify-center rounded-full bg-[#9c3b43]/15"
             >
-              <div className="flex size-9 items-center justify-center rounded-full border-4 border-[#fffaf0] bg-[#9c3b43] text-[#f5d58a] shadow-lg shadow-[#5c252b]/20">
-                <MapPin className="size-4 fill-current" />
+              <div className="flex size-7 items-center justify-center rounded-full border-2 border-[#fffaf0] bg-[#9c3b43] text-[#f5d58a] shadow-lg shadow-[#5c252b]/20">
+                <MapPin className="size-3.5 fill-current" />
               </div>
             </motion.div>
-            <p className="mt-3 text-xs font-bold text-[#5c252b]">
+            <p className="mt-2 text-[11px] font-bold leading-4 text-[#5c252b]">
               {isLoading ? "Finding your live location..." : "Live map is waiting for location access"}
             </p>
           </div>
         )}
       </div>
 
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
+      <div className="px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span
                 className={cn(
-                  "size-2 rounded-full",
+                  "size-2 shrink-0 rounded-full",
                   status === "granted" ? "bg-emerald-500" : hasProblem ? "bg-rose-400" : "bg-amber-400",
                 )}
               />
-              <p className="text-xs font-semibold text-[#5c252b]">{statusCopy[status]}</p>
+              <p className="text-[11px] font-semibold text-[#5c252b]">{statusCopy[status]}</p>
             </div>
-            <p className="mt-2 text-sm font-medium text-[#31101b]">
+            <p className="mt-0.5 truncate text-xs font-medium text-[#31101b]">
               {location
                 ? `${formatCoordinate(location.latitude, "N", "S")} · ${formatCoordinate(location.longitude, "E", "W")}`
                 : "Waiting for a location signal"}
             </p>
-            <p className="mt-1 text-xs text-[#8c6a5f]">
-              {location
-                ? `Accuracy within ${Math.round(location.accuracy)} meters`
-                : "Your guide uses this to find nearby ideas"}
-            </p>
           </div>
-          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
             <LocateFixed className="size-4" />
           </div>
         </div>
 
         {hasProblem && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[#d7a599] bg-[#f9e3db] px-3 py-2.5 text-xs text-[#7d2c2f]">
+          <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-[#d7a599] bg-[#f9e3db] px-3 py-2 text-[11px] text-[#7d2c2f]">
             <p className="leading-5">{error || "Please check your browser permission settings."}</p>
             <button
               type="button"
               onClick={onRetry}
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#fffaf0] px-2.5 py-2 font-bold text-[#7d2c2f] shadow-sm transition active:scale-95"
+              disabled={isLoading}
+              aria-busy={isLoading}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-[#fffaf0] px-2.5 py-2 font-bold text-[#7d2c2f] shadow-sm transition active:scale-95 disabled:cursor-wait disabled:opacity-70"
             >
-              <RefreshCw className="size-3.5" />
-              Retry
+              {isLoading ? (
+                <Spinner className="size-3.5" label="Retrying" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              {isLoading ? "Retrying" : "Retry"}
             </button>
           </div>
         )}

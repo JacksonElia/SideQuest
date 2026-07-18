@@ -23,5 +23,8 @@
     }
   },
   "include": ["next-env.d.ts", ".next/types/**/*.ts", "**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules"]
+  // agent/ is a separate package with its own tsconfig: it targets NodeNext and
+  // uses Node-only globals, so type-checking it under the bundler settings here
+  // would report errors that its own `npm run typecheck` correctly accepts.
+  "exclude": ["node_modules", "agent"]
 }

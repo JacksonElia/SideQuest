@@ -1,38 +1,67 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Mic, Square } from "lucide-react";
-import { cn, formatDuration } from "@/lib/utils";
-import type { RecorderStatus } from "@/types/message";
+import { Mic, MicOff, Volume2 } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
+import { cn } from "@/lib/utils";
+import type { VoiceStatus } from "@/hooks/useVoiceSession";
 
 interface VoiceButtonProps {
   variant?: "default" | "conversation";
-  status: RecorderStatus;
-  durationSeconds: number;
+  status: VoiceStatus;
+  isMuted: boolean;
+  isAgentSpeaking: boolean;
   error: string | null;
-  onStart: () => Promise<void>;
-  onStop: () => void;
+  /** Joins the room and opens the microphone. */
+  onConnect: () => void;
+  /** Mutes or unmutes without leaving the conversation. */
+  onToggleMute: () => void;
 }
 
+/**
+ * Compact sibling of VoiceOrb for the guiding screen.
+ *
+ * Same model: a continuous call the traveler starts once and then mutes when
+ * they want to stop being heard — never a per-utterance record button.
+ */
 export function VoiceButton({
   variant = "default",
   status,
-  durationSeconds,
+  isMuted,
+  isAgentSpeaking,
   error,
-  onStart,
-  onStop,
+  onConnect,
+  onToggleMute,
 }: VoiceButtonProps) {
-  const isListening = status === "listening";
-  const isBusy = status === "requesting" || status === "processing";
   const isConversation = variant === "conversation";
+  const isConnecting = status === "connecting";
+  const isConnected = status === "connected";
+  const isListening = isConnected && !isMuted && !isAgentSpeaking;
 
   const handleClick = () => {
-    if (isListening) {
-      onStop();
-    } else if (!isBusy) {
-      void onStart();
+    if (isConnecting) return;
+    if (isConnected) {
+      onToggleMute();
+      return;
     }
+    onConnect();
   };
+
+  const label = isConnecting
+    ? "Connecting"
+    : !isConnected
+      ? "Tap to talk"
+      : isMuted
+        ? "Muted"
+        : isAgentSpeaking
+          ? "Speaking"
+          : "Listening";
+
+  const ariaLabel = isConnected
+    ? isMuted
+      ? "Unmute microphone"
+      : "Mute microphone"
+    : "Start talking with your guide";
 
   return (
     <div className="relative flex flex-col items-center gap-1">
@@ -40,14 +69,16 @@ export function VoiceButton({
         whileTap={{ scale: 0.9 }}
         type="button"
         onClick={handleClick}
-        disabled={isBusy}
+        disabled={isConnecting}
         className={cn(
           "relative flex items-center justify-center text-white shadow-float transition",
           isConversation ? "size-16 rounded-[22px]" : "size-12 rounded-2xl",
           isListening ? "bg-[#c67c2e] shadow-[#c67c2e]/25" : "bg-[#31101b] hover:bg-[#6b1f32]",
-          isBusy && "cursor-wait opacity-70",
+          isConnected && isMuted && "bg-[#7a4c4d]",
+          isConnecting && "cursor-wait opacity-70",
         )}
-        aria-label={isListening ? "Stop recording" : "Start voice message"}
+        aria-label={ariaLabel}
+        aria-pressed={isConnected ? !isMuted : undefined}
       >
         {isListening && (
           <motion.span
@@ -56,25 +87,23 @@ export function VoiceButton({
             transition={{ duration: 1.4, repeat: Infinity }}
           />
         )}
-        {isListening ? (
-          <Square className={isConversation ? "size-5 fill-current" : "size-4 fill-current"} />
+        {isConnecting ? (
+          <Spinner
+            className={isConversation ? "size-6" : "size-5"}
+            label="Connecting to your guide"
+          />
+        ) : isConnected && isMuted ? (
+          <MicOff className={isConversation ? "size-6" : "size-5"} />
+        ) : isAgentSpeaking ? (
+          <Volume2 className={isConversation ? "size-6" : "size-5"} />
         ) : (
           <Mic className={isConversation ? "size-6" : "size-5"} />
         )}
       </motion.button>
       <span
-        className={cn(
-          "text-[10px] font-semibold",
-          isListening ? "text-[#9c3b43]" : "text-[#8c6a5f]",
-        )}
+        className={cn("text-[10px] font-semibold", isListening ? "text-[#9c3b43]" : "text-[#8c6a5f]")}
       >
-        {isListening
-          ? formatDuration(durationSeconds)
-          : status === "processing"
-            ? "Saving"
-            : isConversation
-              ? "Tap to speak"
-              : "Voice"}
+        {label}
       </span>
       {error && (
         <span className="absolute bottom-full left-0 mb-3 w-44 rounded-lg bg-[#31101b] px-3 py-2 text-center text-[10px] leading-4 text-[#fff8e8] shadow-xl">

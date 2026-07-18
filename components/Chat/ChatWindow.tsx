@@ -21,7 +21,7 @@ export function ChatWindow({ messages, isTyping }: ChatWindowProps) {
   }, [messages.length, isTyping]);
 
   return (
-    <div ref={scrollRef} className="chat-scroll min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5">
+    <div ref={scrollRef} className="chat-scroll min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
       {messages.map((message) => (
         <ChatMessage key={message.id} message={message} />
       ))}

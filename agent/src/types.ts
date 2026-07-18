@@ -33,12 +33,21 @@ export interface TravelProfile {
  */
 export interface UserData {
   profile: TravelProfile | null;
-  /** Most recent fix seen, from participant attributes or the dispatch metadata. */
+  /**
+   * Most recent fix seen. Seeded from the dispatch metadata and then kept
+   * current by the participant-attribute listener in main.ts, so tools can read
+   * it directly instead of reaching back into the room.
+   */
   lastFix: Fix | null;
-  /** Identity of the traveler, used to read their attributes off the room. */
-  participantIdentity: string | null;
+  /**
+   * Pushes the saved profile to the browser so the UI can render it.
+   *
+   * Injected by main.ts because the room lives on the JobContext, which tools
+   * have no handle on. Optional so the tools remain testable without a room.
+   */
+  publishProfile?: (profile: TravelProfile) => Promise<void>;
 }
 
 export function createUserData(initialFix: Fix | null): UserData {
-  return { profile: null, lastFix: initialFix, participantIdentity: null };
+  return { profile: null, lastFix: initialFix };
 }

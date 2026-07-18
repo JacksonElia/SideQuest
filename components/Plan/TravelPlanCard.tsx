@@ -1,85 +1,91 @@
 "use client";
 
-import { ChevronRight, Clock3, Route, ScrollText } from "lucide-react";
-
-const stops = [
-  {
-    number: "01",
-    title: "Start with a slow coffee",
-    detail: "A cozy nearby spot to settle in",
-    time: "15 min",
-  },
-  {
-    number: "02",
-    title: "Follow the local art walk",
-    detail: "Small galleries and street-side finds",
-    time: "35 min",
-  },
-  {
-    number: "03",
-    title: "End somewhere scenic",
-    detail: "A quiet view for your final pause",
-    time: "20 min",
-  },
-];
+import { Compass, Footprints, Route, ScrollText, Wallet } from "lucide-react";
+import type { TravelProfile } from "@/types/message";
 
 interface TravelPlanCardProps {
   questName: string;
   locationLabel: string;
+  /** What the guide learned in planning mode. Null until it saves a profile. */
+  profile?: TravelProfile | null;
 }
 
-export function TravelPlanCard({ questName, locationLabel }: TravelPlanCardProps) {
-  return (
-    <section className="relative mt-4 overflow-visible rounded-xl border-2 border-[#c7ac84] bg-[#eadfca] p-5 shadow-soft">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border-2 border-[#31101b] bg-[#8a293c] text-[#f5d58a] shadow-sm">
-            <Route className="size-5" />
-          </div>
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9c3b43]">
-              Your travel plan
-            </p>
-            <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#31101b]">
-              {questName}
-            </h2>
-          </div>
-        </div>
-      </div>
+const ACTIVITY_COPY: Record<NonNullable<TravelProfile["activityLevel"]>, string> = {
+  spry: "Up for anything",
+  moderate: "A steady pace",
+  restful: "Slow and restful",
+};
 
-      <div className="mt-4 rounded-lg border border-[#d5bd94] bg-[#fffaf0] px-3.5 py-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-[#5c252b]">
-          <ScrollText className="size-3.5 text-[#c67c2e]" />
-          <span>Built around your mood and what is nearby</span>
+const BUDGET_COPY: Record<NonNullable<TravelProfile["budget"]>, string> = {
+  "free-spending": "Spending freely",
+  moderate: "A middling budget",
+  frugal: "Travelling frugally",
+};
+
+function durationCopy(days: number | null): string | null {
+  if (days === null || !Number.isFinite(days) || days <= 0) return null;
+  return days === 1 ? "One day" : `${Math.round(days)} days`;
+}
+
+export function TravelPlanCard({ questName, locationLabel, profile }: TravelPlanCardProps) {
+  // Only the facts the guide actually captured are shown. The traveler is free
+  // to skip any question, so a half-filled profile is a normal outcome, not an
+  // excuse to invent the rest.
+  const facts = profile
+    ? [
+        { icon: Compass, label: durationCopy(profile.durationDays) },
+        {
+          icon: ScrollText,
+          label: profile.interests.length ? profile.interests.join(", ") : null,
+        },
+        {
+          icon: Footprints,
+          label: profile.activityLevel ? ACTIVITY_COPY[profile.activityLevel] : null,
+        },
+        { icon: Wallet, label: profile.budget ? BUDGET_COPY[profile.budget] : null },
+      ].filter((fact): fact is { icon: typeof Compass; label: string } => fact.label !== null)
+    : [];
+
+  return (
+    // Everything shares one screen with the map and the transcript, so the plan
+    // stays a single compact strip: a title row, then whatever the guide knows
+    // as chips that scroll sideways rather than stacking downward.
+    <section className="relative mt-3 shrink-0 overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#eadfca] px-3 py-2.5 shadow-soft">
+      <div className="flex items-center gap-2.5">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border-2 border-[#31101b] bg-[#8a293c] text-[#f5d58a] shadow-sm">
+          <Route className="size-4" />
         </div>
-        <p className="mt-2 text-sm leading-6 text-[#725452]">
-          Take an easy 70-minute wander with one good coffee, a little culture, and a calm place to
-          finish.
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#9c3b43]">
+            Your travel plan
+          </p>
+          <h2 className="truncate text-sm font-semibold tracking-tight text-[#31101b]">
+            {questName}
+          </h2>
+        </div>
+        <p className="max-w-[38%] shrink-0 truncate text-[10px] font-semibold text-[#9c3b43]">
+          {locationLabel || "Your current area"}
         </p>
       </div>
 
-      <div className="mt-4 space-y-3">
-        {stops.map((stop) => (
-          <div key={stop.number} className="flex items-center gap-3">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[#d5bd94] bg-[#fffaf0] text-[10px] font-bold text-[#9c3b43]">
-              {stop.number}
+      {facts.length > 0 ? (
+        <div className="chat-scroll mt-2 flex gap-2 overflow-x-auto">
+          {facts.map(({ icon: Icon, label }) => (
+            <div
+              key={label}
+              className="flex shrink-0 items-center gap-1.5 rounded-full border border-[#d5bd94] bg-[#fffaf0] px-2.5 py-1 text-[11px] font-bold text-[#31101b]"
+            >
+              <Icon className="size-3.5 shrink-0 text-[#9c3b43]" />
+              <span className="max-w-[10rem] truncate">{label}</span>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-[#31101b]">{stop.title}</p>
-              <p className="truncate text-[11px] text-[#725452]">{stop.detail}</p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1 text-[10px] font-semibold text-[#8c6a5f]">
-              <Clock3 className="size-3" />
-              {stop.time}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex items-center justify-between border-t border-[#d5bd94] pt-3 text-[11px] font-semibold text-[#9c3b43]">
-        <span>{locationLabel || "Your current area"} · We’ll adjust this as you talk</span>
-        <ChevronRight className="size-4" />
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 flex items-center gap-1.5 text-[11px] font-semibold text-[#725452]">
+          <ScrollText className="size-3.5 shrink-0 text-[#c67c2e]" />
+          <span className="truncate">Still getting acquainted — keep talking to fill this in.</span>
+        </div>
+      )}
     </section>
   );
 }

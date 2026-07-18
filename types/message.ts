@@ -41,10 +41,11 @@ export type LocationPermissionStatus =
   | "error"
   | "unsupported";
 
-export type RecorderStatus =
-  | "idle"
-  | "requesting"
-  | "listening"
-  | "processing"
-  | "denied"
-  | "error";
+/** What the guide learned in planning mode, pushed from the agent over a text stream. */
+export interface TravelProfile {
+  durationDays: number | null;
+  interests: string[];
+  activityLevel: "spry" | "moderate" | "restful" | null;
+  budget: "free-spending" | "moderate" | "frugal" | null;
+}
+

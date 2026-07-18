@@ -22,6 +22,16 @@
   box-sizing: border-box;
 }
 
+/* The app is a single fixed-height screen: only the transcript scrolls, and the
+   page itself never does. Locking both elements also stops mobile browsers from
+   rubber-banding the whole layout when a scroll gesture starts inside the chat. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 html {
   background: #f7f1e5;
 }

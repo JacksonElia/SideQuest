@@ -1,21 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Home, MapPin, ScrollText } from "lucide-react";
+import { ChatInput } from "@/components/Chat/ChatInput";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
 import { TravelPlanCard } from "@/components/Plan/TravelPlanCard";
-import { QuestPlanning } from "@/components/Quest/QuestPlanning";
+import { QuestScoping } from "@/components/Quest/QuestScoping";
 import { QuestSetup } from "@/components/Quest/QuestSetup";
 import { QuestWelcome } from "@/components/Quest/QuestWelcome";
 import { VoiceButton } from "@/components/Voice/VoiceButton";
 import { useLocation } from "@/hooks/useLocation";
-import { useRecorder } from "@/hooks/useRecorder";
-import { createAssistantMessage, createPlanningMessages, INITIAL_MESSAGES } from "@/lib/mock-ai";
-import { createId } from "@/lib/utils";
+import { useVoiceSession } from "@/hooks/useVoiceSession";
 import type { LocationCoordinates, Message } from "@/types/message";
 
-type QuestScreen = "welcome" | "setup" | "planning" | "main";
+type QuestScreen = "welcome" | "setup" | "scoping" | "main";
 
 interface SavedJourney {
   questName: string;
@@ -28,28 +27,35 @@ const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidew
 
 export default function HomePage() {
   const [screen, setScreen] = useState<QuestScreen>("welcome");
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
-  const [isTyping, setIsTyping] = useState(false);
   const [questName, setQuestName] = useState("The Little Detour");
   const [locationLabel, setLocationLabel] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<LocationCoordinates | null>(null);
   const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
-  const timeoutIdsRef = useRef<number[]>([]);
+  /** Transcript restored from a previous visit, shown above the live one. */
+  const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
+
   const {
     location,
     status: locationStatus,
     error: locationError,
     requestLocation,
-  } = useLocation(screen === "main" || screen === "setup");
-  const {
-    status: recorderStatus,
-    durationSeconds,
-    recordingBlob,
-    error: recorderError,
-    startRecording,
-    stopRecording,
-    clearRecording,
-  } = useRecorder();
+  } = useLocation(screen === "main" || screen === "setup" || screen === "scoping");
+
+  // One session spans scoping and main. The guide moves from planning to active
+  // mode by itself, so reconnecting between screens would restart the
+  // conversation and discard everything it had learned.
+  const voice = useVoiceSession(location);
+  const { connect: connectVoice, disconnect: disconnectVoice, toggleMute, sendText } = voice;
+
+  const messages = useMemo(
+    () => [...restoredMessages, ...voice.messages],
+    [restoredMessages, voice.messages],
+  );
+
+  // The guide's turn is in progress while it speaks, and from the moment the
+  // traveler finishes until its reply lands. A guide transcript only arrives
+  // once the spoken segment completes, so the gap would otherwise look idle.
+  const isTyping = voice.isAgentSpeaking || messages.at(-1)?.role === "user";
 
   const persistJourney = useCallback(
     (nextMessages: Message[], nextQuestName = questName, nextLocationLabel = locationLabel) => {
@@ -57,18 +63,10 @@ export default function HomePage() {
         return;
       }
 
-      const serializableMessages = nextMessages.map((message) => {
-        const copy = { ...message };
-        if (copy.kind === "voice") {
-          delete copy.blob;
-        }
-        return copy;
-      });
-
       const savedJourney: SavedJourney = {
         questName: nextQuestName,
         locationLabel: nextLocationLabel,
-        messages: serializableMessages,
+        messages: nextMessages,
       };
 
       window.localStorage.setItem(JOURNEY_STORAGE_KEY, JSON.stringify(savedJourney));
@@ -76,53 +74,12 @@ export default function HomePage() {
     [locationLabel, questName],
   );
 
-  const clearPendingTimeouts = useCallback(() => {
-    timeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
-    timeoutIdsRef.current = [];
-  }, []);
-
-  const queueAssistantResponse = useCallback(() => {
-    setIsTyping(true);
-    const timeoutId = window.setTimeout(() => {
-      setMessages((currentMessages) => {
-        const nextMessages = [...currentMessages, createAssistantMessage(createId("assistant"))];
-        persistJourney(nextMessages);
-        return nextMessages;
-      });
-      setIsTyping(false);
-      timeoutIdsRef.current = timeoutIdsRef.current.filter((id) => id !== timeoutId);
-    }, 1000);
-
-    timeoutIdsRef.current.push(timeoutId);
-  }, [persistJourney]);
-
-  const addUserMessage = useCallback(
-    (message: Message) => {
-      setMessages((currentMessages) => {
-        const nextMessages = [...currentMessages, message];
-        persistJourney(nextMessages);
-        return nextMessages;
-      });
-      queueAssistantResponse();
-    },
-    [persistJourney, queueAssistantResponse],
-  );
-
   useEffect(() => {
-    if (!recordingBlob) {
+    if (screen === "welcome" || messages.length === 0) {
       return;
     }
-
-    addUserMessage({
-      id: createId("voice"),
-      role: "user",
-      kind: "voice",
-      blob: recordingBlob,
-      durationSeconds,
-      createdAt: new Date().toISOString(),
-    });
-    clearRecording();
-  }, [addUserMessage, clearRecording, durationSeconds, recordingBlob]);
+    persistJourney(messages);
+  }, [messages, persistJourney, screen]);
 
   useEffect(() => {
     if (isUsingCurrentLocation && location) {
@@ -131,18 +88,35 @@ export default function HomePage() {
     }
   }, [isUsingCurrentLocation, location]);
 
+  // TODO: hand the scoping transcript to the quest-generation model instead of naming locally.
+  const advanceToMain = useCallback(() => {
+    const nextQuestName = QUEST_NAMES[Math.floor(Math.random() * QUEST_NAMES.length)]!;
+    setQuestName(nextQuestName);
+    persistJourney(messages, nextQuestName);
+    setScreen("main");
+  }, [messages, persistJourney]);
+
+  /**
+   * The guide decides when planning is done, and says so by saving a profile.
+   * Advancing on that signal keeps the conversation in charge of the flow, which
+   * is what the persona describes. The button stays as a manual override.
+   */
+  const hasAdvancedRef = useRef(false);
   useEffect(() => {
-    return () => {
-      clearPendingTimeouts();
-    };
-  }, [clearPendingTimeouts]);
+    if (screen !== "scoping" || !voice.profile || hasAdvancedRef.current) {
+      return;
+    }
+    hasAdvancedRef.current = true;
+    advanceToMain();
+  }, [advanceToMain, screen, voice.profile]);
 
   const handleStartNewQuest = () => {
-    setMessages(INITIAL_MESSAGES);
+    setRestoredMessages([]);
     setQuestName("The Little Detour");
     setLocationLabel("");
     setSelectedLocation(null);
     setIsUsingCurrentLocation(false);
+    hasAdvancedRef.current = false;
     setScreen("setup");
   };
 
@@ -158,10 +132,10 @@ export default function HomePage() {
           setLocationLabel(parsedJourney.locationLabel);
         }
         if (Array.isArray(parsedJourney.messages)) {
-          setMessages(parsedJourney.messages);
+          setRestoredMessages(parsedJourney.messages);
         }
       } catch {
-        setMessages(INITIAL_MESSAGES);
+        setRestoredMessages([]);
       }
     }
     setScreen("main");
@@ -171,42 +145,24 @@ export default function HomePage() {
     setScreen("welcome");
   };
 
-  const handleUseCurrentLocation = () => {
+  const handleUseCurrentLocation = useCallback(() => {
     setIsUsingCurrentLocation(true);
     requestLocation();
-  };
-
-  const handlePlaceSelect = (label: string, coordinates: LocationCoordinates) => {
-    setIsUsingCurrentLocation(false);
-    setLocationLabel(label);
-    setSelectedLocation(coordinates);
-  };
+  }, [requestLocation]);
 
   const handleCreateQuest = () => {
-    const nextQuestName = QUEST_NAMES[Math.floor(Math.random() * QUEST_NAMES.length)];
-    const nextLocationLabel = locationLabel.trim() || "Current location";
-    const planningMessages = createPlanningMessages(nextQuestName, nextLocationLabel);
-    setQuestName(nextQuestName);
-    setLocationLabel(nextLocationLabel);
-    setMessages(planningMessages);
-    persistJourney(planningMessages, nextQuestName, nextLocationLabel);
-    setScreen("planning");
+    setLocationLabel(locationLabel.trim() || "Current location");
+    hasAdvancedRef.current = false;
+    setScreen("scoping");
   };
 
-  const handlePlanningBack = () => {
-    clearPendingTimeouts();
-    setIsTyping(false);
+  const handleScopingBack = () => {
+    void disconnectVoice();
     setScreen("setup");
   };
 
-  const handleStartQuest = () => {
-    persistJourney(messages);
-    setScreen("main");
-  };
-
   const handleReturnToStart = () => {
-    clearPendingTimeouts();
-    setIsTyping(false);
+    void disconnectVoice();
     setScreen("welcome");
   };
 
@@ -228,7 +184,6 @@ export default function HomePage() {
         locationLabel={locationLabel}
         selectedLocation={selectedLocation}
         isUsingCurrentLocation={isUsingCurrentLocation}
-        onPlaceSelect={handlePlaceSelect}
         onUseCurrentLocation={handleUseCurrentLocation}
         onBack={handleSetupBack}
         onCreateQuest={handleCreateQuest}
@@ -236,45 +191,50 @@ export default function HomePage() {
     );
   }
 
-  if (screen === "planning") {
+  if (screen === "scoping") {
     return (
-      <QuestPlanning
-        questName={questName}
+      <QuestScoping
         locationLabel={locationLabel}
         messages={messages}
         isTyping={isTyping}
-        recorderStatus={recorderStatus}
-        durationSeconds={durationSeconds}
-        recorderError={recorderError}
-        onBack={handlePlanningBack}
-        onStartQuest={handleStartQuest}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
+        voiceStatus={voice.status}
+        isMuted={voice.isMuted}
+        isAgentSpeaking={voice.isAgentSpeaking}
+        voiceError={voice.error}
+        agentDispatched={voice.agentDispatched}
+        onBack={handleScopingBack}
+        onGenerateQuests={advanceToMain}
+        onConnect={() => void connectVoice()}
+        onToggleMute={() => void toggleMute()}
       />
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#e9dcc6]">
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col overflow-hidden bg-[#f7f1e5] shadow-[8px_0_0_rgba(82,30,39,0.08)]">
-        <header className="safe-top flex items-center justify-between px-5 pb-3 pt-4">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-lg border-2 border-[#31101b] bg-[#8a293c] text-[#f5d58a] shadow-float">
-              <ScrollText className="size-5" strokeWidth={2.3} />
+    <main className="h-dvh overflow-hidden bg-[#e9dcc6]">
+      <div className="mx-auto flex h-full w-full max-w-md flex-col overflow-hidden bg-[#f7f1e5] shadow-[8px_0_0_rgba(82,30,39,0.08)]">
+        <header className="safe-top flex shrink-0 items-center justify-between px-5 pb-2 pt-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border-2 border-[#31101b] bg-[#8a293c] text-[#f5d58a] shadow-float">
+              <ScrollText className="size-4" strokeWidth={2.3} />
             </div>
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#8c6a5f]">
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#8c6a5f]">
                 SideQuest
               </p>
-              <h1 className="text-base font-semibold tracking-tight text-[#31101b]">
+              <h1 className="truncate text-sm font-semibold tracking-tight text-[#31101b]">
                 Your walking guide
               </h1>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-sm border border-[#c7ac84] bg-[#fffaf0] px-3 py-2 text-xs font-semibold text-[#5c252b] shadow-sm">
-              <span className="size-1.5 rounded-full bg-[#c67c2e]" />
-              Exploring
+              <span
+                className={`size-1.5 rounded-full ${
+                  voice.status === "connected" ? "bg-[#4b7f52]" : "bg-[#c67c2e]"
+                }`}
+              />
+              {voice.status === "connected" ? "Guide live" : "Exploring"}
             </div>
             <button
               type="button"
@@ -288,48 +248,60 @@ export default function HomePage() {
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 flex-col px-4 pb-3">
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <MapCard
             location={location}
             status={locationStatus}
             error={locationError}
             onRetry={requestLocation}
           />
-          <TravelPlanCard questName={questName} locationLabel={locationLabel} />
+          <TravelPlanCard
+            questName={questName}
+            locationLabel={locationLabel}
+            profile={voice.profile}
+          />
 
-          <section className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
-            <div className="flex items-center justify-between border-b border-[#dfceb1] px-5 py-4">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8c6a5f]">
+          <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
+            <div className="flex shrink-0 items-center justify-between border-b border-[#dfceb1] px-4 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8c6a5f]">
                   Conversation
                 </p>
-                <h2 className="mt-1 text-lg font-semibold tracking-tight text-[#31101b]">
+                <h2 className="truncate text-sm font-semibold tracking-tight text-[#31101b]">
                   Where should we wander?
                 </h2>
               </div>
-              <div className="flex size-9 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
                 <MapPin className="size-4" />
               </div>
             </div>
 
             <ChatWindow messages={messages} isTyping={isTyping} />
-            <div className="border-t border-[#dfceb1] bg-[#fffaf0] px-5 py-4">
-              <div className="flex flex-col items-center text-center">
-                <p className="text-xs font-semibold text-[#5c252b]">
-                  Talk it through with your guide
-                </p>
-                <p className="mt-1 text-[11px] text-[#8c6a5f]">Tap and speak naturally</p>
-                <div className="mt-3">
-                  <VoiceButton
-                    variant="conversation"
-                    status={recorderStatus}
-                    durationSeconds={durationSeconds}
-                    error={recorderError}
-                    onStart={startRecording}
-                    onStop={stopRecording}
-                  />
-                </div>
+
+            {voice.status === "connected" && !voice.agentDispatched && (
+              <p
+                role="alert"
+                className="shrink-0 border-t border-[#dfceb1] bg-[#f7e6d0] px-4 py-2 text-[11px] leading-4 text-[#5c252b]"
+              >
+                No guide joined this room. Check that the agent worker is running.
+              </p>
+            )}
+
+            {/* Typing and talking sit on one row so the composer costs a single
+                line of the screen instead of a stacked block. */}
+            <div className="flex shrink-0 items-end gap-2 border-t border-[#dfceb1] bg-[#fffaf0] px-4 py-3">
+              <div className="min-w-0 flex-1 pb-4">
+                {/* Sending connects on demand, so the mic never has to be tapped first. */}
+                <ChatInput onSend={sendText} />
               </div>
+              <VoiceButton
+                status={voice.status}
+                isMuted={voice.isMuted}
+                isAgentSpeaking={voice.isAgentSpeaking}
+                error={voice.error}
+                onConnect={() => void connectVoice()}
+                onToggleMute={() => void toggleMute()}
+              />
             </div>
           </section>
         </div>

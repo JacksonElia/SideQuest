@@ -1,34 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Check, LocateFixed, MapPin, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, RefreshCw } from "lucide-react";
+import { Spinner } from "@/components/ui/Spinner";
 import type { LocationCoordinates, LocationPermissionStatus } from "@/types/message";
 import { formatCoordinate, getOpenStreetMapEmbedUrl } from "@/lib/utils";
-
-interface PlaceResult {
-  id: string;
-  label: string;
-  detail: string;
-  coordinates: LocationCoordinates;
-}
-
-interface PhotonFeature {
-  properties?: {
-    name?: string;
-    city?: string;
-    state?: string;
-    country?: string;
-    osm_id?: number;
-  };
-  geometry?: {
-    coordinates?: [number, number];
-  };
-}
-
-interface PhotonResponse {
-  features?: PhotonFeature[];
-}
 
 interface QuestSetupProps {
   location: LocationCoordinates | null;
@@ -37,34 +14,9 @@ interface QuestSetupProps {
   locationLabel: string;
   selectedLocation: LocationCoordinates | null;
   isUsingCurrentLocation: boolean;
-  onPlaceSelect: (label: string, coordinates: LocationCoordinates) => void;
   onUseCurrentLocation: () => void;
   onBack: () => void;
   onCreateQuest: () => void;
-}
-
-function formatPlace(feature: PhotonFeature): PlaceResult | null {
-  const coordinates = feature.geometry?.coordinates;
-  if (!coordinates) {
-    return null;
-  }
-
-  const [longitude, latitude] = coordinates;
-  const name = feature.properties?.name;
-  if (!name || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-    return null;
-  }
-
-  const detail = [feature.properties?.city, feature.properties?.state, feature.properties?.country]
-    .filter(Boolean)
-    .join(", ");
-
-  return {
-    id: `${feature.properties?.osm_id ?? name}-${latitude}-${longitude}`,
-    label: name,
-    detail: detail || "Selected place",
-    coordinates: { latitude, longitude, accuracy: 0 },
-  };
 }
 
 export function QuestSetup({
@@ -74,72 +26,44 @@ export function QuestSetup({
   locationLabel,
   selectedLocation,
   isUsingCurrentLocation,
-  onPlaceSelect,
   onUseCurrentLocation,
   onBack,
   onCreateQuest,
 }: QuestSetupProps) {
-  const [results, setResults] = useState<PlaceResult[]>([]);
-  const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "error">("idle");
-  const [searchQuery, setSearchQuery] = useState("");
-  const abortControllerRef = useRef<AbortController | null>(null);
   const mapLocation = isUsingCurrentLocation ? location : selectedLocation;
-  const searchValue = searchQuery;
   const canCreateQuest = Boolean(locationLabel.trim() && mapLocation);
-  const isRequesting = locationStatus === "requesting";
   const hasLocationError =
     locationStatus === "denied" || locationStatus === "error" || locationStatus === "unsupported";
 
+  // The starting point is always "wherever you are", so ask for it on arrival
+  // instead of making the traveler tap a button that has only one answer.
+  const hasRequestedRef = useRef(false);
   useEffect(() => {
-    const query = searchValue.trim();
-    abortControllerRef.current?.abort();
-
-    if (query.length < 2) {
-      setResults([]);
-      setSearchStatus("idle");
+    if (hasRequestedRef.current) {
       return;
     }
+    hasRequestedRef.current = true;
+    onUseCurrentLocation();
+  }, [onUseCurrentLocation]);
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    const timeoutId = window.setTimeout(async () => {
-      setSearchStatus("loading");
-      try {
-        const response = await fetch(
-          `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5&lang=en`,
-          { signal: controller.signal },
-        );
-        if (!response.ok) {
-          throw new Error(`Place search failed with ${response.status}`);
-        }
-
-        const data = (await response.json()) as PhotonResponse;
-        setResults(
-          (data.features ?? [])
-            .map(formatPlace)
-            .filter((place): place is PlaceResult => place !== null),
-        );
-        setSearchStatus("idle");
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-
-        setResults([]);
-        setSearchStatus("error");
-      }
-    }, 350);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, [searchValue]);
+  if (!mapLocation && !hasLocationError) {
+    return (
+      <main className="h-dvh overflow-hidden bg-[#f7f1e5] text-[#31101b]">
+        <div className="mx-auto flex h-full w-full max-w-md flex-col items-center justify-center gap-5 px-8 text-center">
+          <Spinner className="size-10 text-[#9c3b43]" label="Finding your location" />
+          <h1 className="text-2xl font-semibold tracking-[-0.04em]">Finding your location...</h1>
+          <p className="text-sm leading-6 text-[#725452]">
+            Approve the browser permission prompt so we can drop your pin.
+          </p>
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="min-h-screen bg-[#f7f1e5] text-[#31101b]">
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col px-5 py-6">
-        <header className="flex items-center justify-between">
+    <main className="h-dvh overflow-hidden bg-[#f7f1e5] text-[#31101b]">
+      <div className="mx-auto flex h-full w-full max-w-md flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))]">
+        <header className="flex shrink-0 items-center justify-between">
           <button
             type="button"
             onClick={onBack}
@@ -157,104 +81,53 @@ export function QuestSetup({
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex flex-1 flex-col pt-10"
+          className="flex min-h-0 flex-1 flex-col pt-6"
         >
-          <p className="text-sm font-bold uppercase tracking-[0.12em] text-[#9c3b43]">
-            Every Quest needs a beginning
-          </p>
-          <h1 className="mt-2 text-4xl font-semibold leading-tight tracking-[-0.05em] text-[#31101b]">
+          <h1 className="shrink-0 text-3xl font-semibold leading-tight tracking-[-0.05em] text-[#31101b] sm:text-4xl">
             Where should we wander?
           </h1>
-          <p className="mt-4 text-sm leading-6 text-[#725452]">
-            Start wherever you are, or search for a different place for the day.
+          <p className="mt-2 shrink-0 text-sm leading-6 text-[#725452]">
+            We&apos;ll start from right where you are.
           </p>
 
-          <div className="relative mt-7 overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
-            {mapLocation ? (
-              <>
-                <iframe
-                  title="Interactive starting point map"
-                  src={getOpenStreetMapEmbedUrl(mapLocation)}
-                  className="h-56 w-full border-0"
-                  loading="eager"
-                />
-                <div className="absolute left-4 top-4 rounded-sm bg-[#fffaf0]/95 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#5c252b] shadow-sm">
-                  Drag or zoom the map
-                </div>
-                <div className="border-t border-[#dfceb1] bg-[#fffaf0] p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-[#31101b]">
-                        {isUsingCurrentLocation ? "Your current location" : locationLabel}
-                      </p>
-                      <p className="mt-1 truncate text-[10px] text-[#725452]">
-                        {formatCoordinate(mapLocation.latitude, "N", "S")} ·{" "}
-                        {formatCoordinate(mapLocation.longitude, "E", "W")}
-                      </p>
-                    </div>
-                    {isUsingCurrentLocation && <Check className="size-5 shrink-0 text-[#9c3b43]" />}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="flex h-56 flex-col items-center justify-center px-8 text-center">
-                <div className="flex size-12 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
-                  <MapPin className="size-6" />
-                </div>
-                <p className="mt-4 text-sm font-bold text-[#31101b]">Your map will appear here</p>
-                <p className="mt-2 text-xs leading-5 text-[#725452]">
-                  Use your device location or choose one of the search results to open an
-                  interactive map.
-                </p>
+          {/* The map takes the leftover height instead of a fixed one, so the
+              screen fits without scrolling on any phone. */}
+          {mapLocation && (
+            <div className="relative mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
+              <iframe
+                title="Interactive starting point map"
+                src={getOpenStreetMapEmbedUrl(mapLocation)}
+                className="min-h-0 w-full flex-1 border-0"
+                loading="eager"
+              />
+              <div className="absolute left-4 top-4 rounded-sm bg-[#fffaf0]/95 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#5c252b] shadow-sm">
+                Drag or zoom the map
               </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSearchQuery("");
-              onUseCurrentLocation();
-            }}
-            disabled={isRequesting}
-            aria-busy={isRequesting}
-            className="mt-4 flex w-full items-center justify-between rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-4 py-3.5 text-left shadow-soft transition hover:border-[#9c3b43] hover:bg-[#f6ead3] active:translate-x-0.5 active:translate-y-0.5 disabled:cursor-wait disabled:border-[#c7ac84] disabled:bg-[#fffaf0] disabled:opacity-70"
-          >
-            <span className="flex items-center gap-3">
-              <span className="flex size-9 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
-                {isRequesting ? <Spinner className="size-4" /> : <LocateFixed className="size-4" />}
-              </span>
-              <span>
-                <span className="block text-xs font-bold text-[#31101b]">
-                  Use my current location
-                </span>
-                <span className="mt-1 block text-[10px] text-[#725452]">
-                  {isRequesting
-                    ? "Waiting for browser permission..."
-                    : isUsingCurrentLocation && location
-                      ? "Your live location is selected"
-                      : "Your browser will ask for permission"}
-                </span>
-              </span>
-            </span>
-            {isUsingCurrentLocation && location ? (
-              <Check className="size-5 text-[#9c3b43]" />
-            ) : (
-              <ArrowRight className="size-4 text-[#8c6a5f]" />
-            )}
-          </button>
+              <div className="shrink-0 border-t border-[#dfceb1] bg-[#fffaf0] p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold text-[#31101b]">
+                      {isUsingCurrentLocation ? "Your current location" : locationLabel}
+                    </p>
+                    <p className="mt-1 truncate text-[10px] text-[#725452]">
+                      {formatCoordinate(mapLocation.latitude, "N", "S")} ·{" "}
+                      {formatCoordinate(mapLocation.longitude, "E", "W")}
+                    </p>
+                  </div>
+                  {isUsingCurrentLocation && <Check className="size-5 shrink-0 text-[#9c3b43]" />}
+                </div>
+              </div>
+            </div>
+          )}
 
           {hasLocationError && (
-            <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[#d7a599] bg-[#f9e3db] px-3 py-2.5 text-xs text-[#7d2c2f]">
+            <div className="mt-4 flex shrink-0 items-center justify-between gap-3 rounded-lg border border-[#d7a599] bg-[#f9e3db] px-3 py-2.5 text-xs text-[#7d2c2f]">
               <p className="leading-5">
-                {locationError || "Location access is unavailable. Search for a place instead."}
+                {locationError || "Location access is unavailable right now."}
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  setSearchQuery("");
-                  onUseCurrentLocation();
-                }}
+                onClick={onUseCurrentLocation}
                 className="flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-2.5 py-2 font-bold shadow-sm transition active:scale-95"
               >
                 <RefreshCw className="size-3.5" />
@@ -263,65 +136,17 @@ export function QuestSetup({
             </div>
           )}
 
-          <div className="relative mt-4">
-            <Search className="pointer-events-none absolute left-4 top-4 size-4 text-[#8c6a5f]" />
-            <input
-              value={searchValue}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search a city, neighborhood, or landmark"
-              className="w-full rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-11 py-4 text-sm text-[#31101b] outline-none transition placeholder:text-[#9a7b6b] focus:border-[#9c3b43] focus:ring-4 focus-within:ring-[#e8c98b]/50"
-              aria-label="Search for a starting location"
-            />
-            {searchStatus === "loading" && (
-              <span className="absolute right-4 top-4 text-[10px] font-bold text-[#8c6a5f]">
-                Searching...
-              </span>
-            )}
-          </div>
-
-          {!isUsingCurrentLocation && results.length > 0 && (
-            <div className="mt-2 overflow-hidden rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
-              {results.map((place) => (
-                <button
-                  key={place.id}
-                  type="button"
-                  onClick={() => {
-                    onPlaceSelect(place.label, place.coordinates);
-                    setSearchQuery("");
-                  }}
-                  className="flex w-full items-center gap-3 border-b border-[#eadcc5] px-4 py-3 text-left last:border-0 transition hover:bg-[#f6ead3] active:bg-[#ead5aa]"
-                >
-                  <span className="flex size-8 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
-                    <MapPin className="size-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-bold text-[#31101b]">{place.label}</span>
-                    <span className="mt-1 block truncate text-[10px] text-[#725452]">
-                      {place.detail}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {searchStatus === "error" && (
-            <p className="mt-2 text-xs leading-5 text-[#9c3b43]">
-              Place search is unavailable right now. Please try again or use your current location.
-            </p>
-          )}
-
-          <p className="mt-3 text-[10px] leading-4 text-[#8c6a5f]">
-            Map data © OpenStreetMap contributors. Place search uses Photon by Komoot.
+          <p className="mt-2 shrink-0 text-[10px] leading-4 text-[#8c6a5f]">
+            Map data © OpenStreetMap contributors.
           </p>
 
           <button
             type="button"
             onClick={onCreateQuest}
             disabled={!canCreateQuest}
-            className="mt-auto flex w-full items-center justify-center gap-2 rounded-lg border-2 border-[#31101b] bg-[#31101b] px-5 py-4 text-sm font-bold text-[#fff8e8] shadow-float transition hover:bg-[#6b1f32] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:border-[#d7c5a7] disabled:bg-[#d7c5a7] disabled:text-[#8c6a5f] disabled:shadow-none"
+            className="mt-3 flex w-full shrink-0 items-center justify-center gap-2 rounded-lg border-2 border-[#31101b] bg-[#31101b] px-5 py-4 text-sm font-bold text-[#fff8e8] shadow-float transition hover:bg-[#6b1f32] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:cursor-not-allowed disabled:border-[#d7c5a7] disabled:bg-[#d7c5a7] disabled:text-[#8c6a5f] disabled:shadow-none"
           >
-            Plan my Quest
+            Find some quests
             <ArrowRight className="size-4" />
           </button>
         </motion.div>
