@@ -95,7 +95,10 @@ function toQuests(value: unknown): Quest[] {
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
 export default function HomePage() {
-  const [screen, setScreen] = useState<QuestScreen>("welcome");
+  // Last-minute demo cut: no welcome/setup/scoping — boot straight into the
+  // homepage with the live conversational guide. The other screens remain in
+  // code but are unreachable.
+  const [screen, setScreen] = useState<QuestScreen>("main");
   const [questName, setQuestName] = useState("The Little Detour");
   const [locationLabel, setLocationLabel] = useState("");
   const [selectedLocation, setSelectedLocation] = useState<LocationCoordinates | null>(null);
@@ -319,9 +322,10 @@ export default function HomePage() {
     setScreen("setup");
   };
 
+  // The welcome flow is cut, so "return to start" just ends the conversation
+  // and stays on the homepage.
   const handleReturnToStart = () => {
     void disconnectVoice();
-    setScreen("welcome");
   };
 
   if (screen === "welcome") {
