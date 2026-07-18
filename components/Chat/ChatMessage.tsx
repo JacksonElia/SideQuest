@@ -1,10 +1,10 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Compass, Headphones } from "lucide-react";
+import { Compass } from "lucide-react";
 import Image from "next/image";
 import type { Message } from "@/types/message";
-import { cn, formatDuration } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 interface ChatMessageProps {
   message: Message;
@@ -47,40 +47,6 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <p className={cn("text-xs", isUser ? "text-[#f5d58a]" : "text-[#8c6a5f]")}>
               Photo shared with your guide
             </p>
-          </div>
-        )}
-        {message.kind === "voice" && (
-          <div className="flex min-w-40 items-center gap-3">
-            <div
-              className={cn(
-                "flex size-9 items-center justify-center rounded-full",
-                isUser ? "bg-[#6b1f32] text-[#f5d58a]" : "bg-[#fffaf0] text-[#9c3b43]",
-              )}
-            >
-              <Headphones className="size-4" />
-            </div>
-            <div className="flex-1">
-              <div
-                className={cn(
-                  "flex items-center gap-1",
-                  isUser ? "text-[#f5d58a]" : "text-[#8c6a5f]",
-                )}
-              >
-                {[3, 6, 10, 5, 8, 4, 7, 3].map((height, index) => (
-                  <span
-                    key={`${height}-${index}`}
-                    className={cn(
-                      "w-0.5 rounded-full",
-                      isUser ? "bg-[#e5b85f]" : "bg-[#c67c2e]",
-                    )}
-                    style={{ height }}
-                  />
-                ))}
-              </div>
-              <p className={cn("mt-1 text-xs", isUser ? "text-[#f5d58a]" : "text-[#8c6a5f]")}>
-                Voice note · {formatDuration(message.durationSeconds)}
-              </p>
-            </div>
           </div>
         )}
       </div>

@@ -12,10 +12,6 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@moss-dev/moss",
     "@moss-dev/moss-core",
-    // Not for bundling reasons — /api/vendor/livekit-client require.resolve()s
-    // this package to serve its ESM build to the bundler-free test page, and
-    // that only yields a real node_modules path when webpack leaves it alone.
-    "livekit-client",
   ],
 };
 

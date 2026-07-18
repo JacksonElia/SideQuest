@@ -8,19 +8,10 @@ import { cn } from "@/lib/utils";
 interface ChatInputProps {
   disabled?: boolean;
   placeholder?: string;
-  /**
-   * Sends the message to the guide. Resolves once it is on the wire; the reply
-   * arrives later as a transcript, not as a return value.
-   */
+  /** Sends a typed message to the local text guide. */
   onSend: (text: string) => Promise<void>;
 }
 
-/**
- * Typing to the guide.
- *
- * Text goes to the same agent over the same room as speech, so a typed question
- * and a spoken one continue one conversation rather than two.
- */
 export function ChatInput({ disabled = false, placeholder, onSend }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -65,7 +56,11 @@ export function ChatInput({ disabled = false, placeholder, onSend }: ChatInputPr
           canSend ? "bg-[#8a293c] hover:bg-[#9c3b43] active:scale-95" : "bg-[#c7ac84]",
         )}
       >
-        {isSending ? <Spinner className="size-4" label="Sending" /> : <SendHorizontal className="size-4" />}
+        {isSending ? (
+          <Spinner className="size-4" label="Sending" />
+        ) : (
+          <SendHorizontal className="size-4" />
+        )}
       </button>
     </form>
   );

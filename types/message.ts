@@ -1,5 +1,5 @@
 export type MessageRole = "user" | "assistant";
-export type MessageKind = "text" | "image" | "voice";
+export type MessageKind = "text" | "image";
 
 interface BaseMessage {
   id: string;
@@ -19,13 +19,7 @@ export interface ImageMessage extends BaseMessage {
   alt: string;
 }
 
-export interface VoiceMessage extends BaseMessage {
-  kind: "voice";
-  blob?: Blob;
-  durationSeconds: number;
-}
-
-export type Message = TextMessage | ImageMessage | VoiceMessage;
+export type Message = TextMessage | ImageMessage;
 
 export interface LocationCoordinates {
   latitude: number;
@@ -34,12 +28,7 @@ export interface LocationCoordinates {
 }
 
 export type LocationPermissionStatus =
-  | "idle"
-  | "requesting"
-  | "granted"
-  | "denied"
-  | "error"
-  | "unsupported";
+  "idle" | "requesting" | "granted" | "denied" | "error" | "unsupported";
 
 /** A generated quest: a named walk built from retrieved places. */
 export interface Quest {
@@ -48,11 +37,10 @@ export interface Quest {
   stops: string[];
 }
 
-/** What the guide learned in planning mode, pushed from the agent over a text stream. */
+/** What the traveler entered during typed quest planning. */
 export interface TravelProfile {
   durationDays: number | null;
   interests: string[];
   activityLevel: "spry" | "moderate" | "restful" | null;
   budget: "free-spending" | "moderate" | "frugal" | null;
 }
-

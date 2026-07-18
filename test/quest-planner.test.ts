@@ -34,7 +34,7 @@ test("buildQuestQueryPrompt renders the saved profile and runtime location conte
   const prompt = buildQuestQueryPrompt(CONTEXT, FULL_PROFILE);
 
   assert.equal(QUEST_PLANNER_MODEL, "google/gemini-3.1-flash-lite-preview");
-  // The answers now come from the profile the voice agent saved.
+  // The answers come from the typed planning profile.
   assert.match(prompt, /Just a single day out/);
   assert.match(prompt, /local food, historic sites/);
   assert.match(prompt, /wants a comfortable amount of walking/);
