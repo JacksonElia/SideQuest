@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import math
 import os
 import re
@@ -125,13 +126,9 @@ class MossStore(Store):
 
     def add_docs(self, index_name: str, docs: list[Document]) -> None:
         moss_docs = [self._to_moss_doc(index_name, doc) for doc in docs]
-        if not moss_docs:
-            return
-        if not self._index_exists(index_name):
-            _run(self._client.create_index(index_name, moss_docs))
-            self._wait_until_ready(index_name)
-            return
-        _run(self._client.add_docs(index_name, moss_docs, MutationOptions(upsert=True)))
+        existed = self._ensure_index(index_name, moss_docs)
+        if moss_docs and existed:
+            _run(self._client.add_docs(index_name, moss_docs, MutationOptions(upsert=True)))
 
     def search(
         self,
@@ -143,6 +140,8 @@ class MossStore(Store):
         filters: dict | None = None,
         top_k: int = 5,
     ) -> list[SearchResult]:
+        if not self._ensure_index(index_name):
+            return []
         candidate_count = max(top_k, 100) if filters or radius_m is not None else top_k
         _run(self._client.load_index(index_name))
         response = _run(self._client.query(index_name, query_text, QueryOptions(top_k=candidate_count)))
@@ -150,22 +149,24 @@ class MossStore(Store):
             {
                 "text": doc.text,
                 "score": float(doc.score),
-                "metadata": dict(doc.metadata or {}),
+                "metadata": _decode_metadata(dict(doc.metadata or {})),
             }
             for doc in response.docs
-            if _matches_filters(dict(doc.metadata or {}), filters)
-            and _within_radius(dict(doc.metadata or {}), lat, lng, radius_m)
+            if _matches_filters(_decode_metadata(dict(doc.metadata or {})), filters)
+            and _within_radius(_decode_metadata(dict(doc.metadata or {})), lat, lng, radius_m)
         ]
         matches.sort(key=lambda result: result["score"], reverse=True)
         return matches[:top_k]
 
     def update_metadata(self, index_name: str, place_id: str, updates: dict) -> None:
+        if not self._ensure_index(index_name):
+            return
         docs = self._matching_moss_docs(index_name, {"place_id": place_id})
         changed_docs = [
             DocumentInfo(
                 id=doc.id,
                 text=doc.text,
-                metadata={**dict(doc.metadata or {}), **updates},
+                metadata=_encode_metadata({**_decode_metadata(dict(doc.metadata or {})), **updates}),
                 payload=doc.payload,
             )
             for doc in docs
@@ -174,16 +175,29 @@ class MossStore(Store):
             _run(self._client.add_docs(index_name, changed_docs, MutationOptions(upsert=True)))
 
     def delete_where(self, index_name: str, filters: dict) -> None:
+        if not self._ensure_index(index_name):
+            return
         doc_ids = [doc.id for doc in self._matching_moss_docs(index_name, filters)]
         if doc_ids:
             _run(self._client.delete_docs(index_name, doc_ids))
 
-    def _index_exists(self, index_name: str) -> bool:
-        return any(index.name == index_name for index in _run(self._client.list_indexes()))
+    def _ensure_index(self, index_name: str, docs: list[DocumentInfo] | None = None) -> bool:
+        """Return whether the index exists, creating it from supplied documents if missing."""
+        try:
+            _run(self._client.get_index(index_name))
+            return True
+        except RuntimeError as error:
+            if "INDEX_NOT_FOUND" not in str(error).upper():
+                raise
+            if not docs:
+                return False
+            _run(self._client.create_index(index_name, docs or []))
+            self._wait_until_ready(index_name)
+            return False
 
     def _matching_moss_docs(self, index_name: str, filters: dict) -> list[DocumentInfo]:
         docs = _run(self._client.get_docs(index_name, GetDocumentsOptions()))
-        return [doc for doc in docs if _matches_filters(dict(doc.metadata or {}), filters)]
+        return [doc for doc in docs if _matches_filters(_decode_metadata(dict(doc.metadata or {})), filters)]
 
     def _wait_until_ready(self, index_name: str, timeout_s: float = 60.0) -> None:
         deadline = time.monotonic() + timeout_s
@@ -202,7 +216,7 @@ class MossStore(Store):
         text = doc["text"]
         metadata = dict(doc["metadata"])
         doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{index_name}:{metadata.get('place_id', '')}:{text}"))
-        return DocumentInfo(id=doc_id, text=text, metadata=metadata)
+        return DocumentInfo(id=doc_id, text=text, metadata=_encode_metadata(metadata))
 
 
 def _tokens(text: str) -> set[str]:
@@ -211,6 +225,20 @@ def _tokens(text: str) -> set[str]:
 
 def _matches_filters(metadata: dict, filters: dict | None) -> bool:
     return not filters or all(metadata.get(key) == value for key, value in filters.items())
+
+
+def _encode_metadata(metadata: dict) -> dict[str, str]:
+    return {key: json.dumps(value, separators=(",", ":")) for key, value in metadata.items()}
+
+
+def _decode_metadata(metadata: dict[str, str]) -> dict:
+    decoded: dict = {}
+    for key, value in metadata.items():
+        try:
+            decoded[key] = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            decoded[key] = value
+    return decoded
 
 
 def _within_radius(
