@@ -129,7 +129,7 @@ export class FakeStore implements Store {
 /** Store backed by the real Moss SDK. */
 export class MossStore implements Store {
   #client: MossClient;
-  #loadedIndexes = new Set<string>();
+  #loadedIndexes = new Map<string, Promise<boolean>>();
 
   constructor() {
     const projectId = process.env.MOSS_PROJECT_ID;
@@ -140,18 +140,42 @@ export class MossStore implements Store {
     this.#client = new MossClient(projectId, projectKey, { cachePath: mossCachePath() });
   }
 
-  /** Load an existing index once so later queries stay on the hot path. */
-  async loadIndex(indexName: string): Promise<boolean> {
-    if (this.#loadedIndexes.has(indexName)) return true;
-    if (!(await this.#ensureIndex(indexName))) return false;
+  /**
+   * Load an existing index once so later queries stay on the hot path.
+   *
+   * The in-flight promise is cached, not just the completed name: concurrent
+   * queries on a cold instance would otherwise both clear a has()-check and
+   * both drive the native addon's loader for the same index.
+   */
+  loadIndex(indexName: string): Promise<boolean> {
+    const inFlight = this.#loadedIndexes.get(indexName);
+    if (inFlight) return inFlight;
 
-    // cachePath lets a warm instance reuse the downloaded index instead of
-    // re-fetching it. On Vercel only /tmp is writable, and it survives for the
-    // life of the instance — so this pays off across requests but not across
-    // cold starts. See mossCachePath().
-    await this.#client.loadIndex(indexName, { cachePath: mossCachePath() });
-    this.#loadedIndexes.add(indexName);
-    return true;
+    const pending = (async () => {
+      if (!(await this.#ensureIndex(indexName))) return false;
+
+      // cachePath lets a warm instance reuse the downloaded index instead of
+      // re-fetching it. On Vercel only /tmp is writable, and it survives for the
+      // life of the instance — so this pays off across requests but not across
+      // cold starts. See mossCachePath().
+      await this.#client.loadIndex(indexName, { cachePath: mossCachePath() });
+      return true;
+    })();
+
+    // Same reasoning as getStore() in query.ts: cache the success, never the
+    // failure. A missing index is also uncached — bootstrap may create it after
+    // this instance is already warm.
+    this.#loadedIndexes.set(indexName, pending);
+    const forget = () => {
+      if (this.#loadedIndexes.get(indexName) === pending) {
+        this.#loadedIndexes.delete(indexName);
+      }
+    };
+    pending.then((loaded) => {
+      if (!loaded) forget();
+    }, forget);
+
+    return pending;
   }
 
   async addDocs(indexName: string, docs: Document[]): Promise<void> {

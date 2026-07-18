@@ -26,6 +26,11 @@ import { join } from 'node:path';
 
 export const runtime = 'nodejs';
 
+// Without this the parameterless GET is prerendered at build time, so the
+// node_modules read happens during `next build` and its result — including a
+// 503 from a failed resolve — is frozen into the output for good.
+export const dynamic = 'force-dynamic';
+
 interface PackageManifest {
   exports?: { '.'?: { import?: string } };
   module?: string;

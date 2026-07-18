@@ -37,12 +37,19 @@ interface QueryBody {
 }
 
 export async function POST(request: Request) {
-  let body: QueryBody;
+  let parsed: unknown;
   try {
-    body = (await request.json()) as QueryBody;
+    parsed = await request.json();
   } catch {
     return NextResponse.json({ error: 'body must be valid JSON' }, { status: 400 });
   }
+
+  // A literal `null` body parses cleanly, so the try/catch above lets it
+  // through and the field reads below would throw an unhandled 500.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return NextResponse.json({ error: 'body must be a JSON object' }, { status: 400 });
+  }
+  const body = parsed as QueryBody;
 
   const fix = validateFix({ lat: body.lat, lng: body.lng });
   if (!fix.ok) {

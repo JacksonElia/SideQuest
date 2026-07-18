@@ -44,14 +44,25 @@ export interface QueryResult {
 let storePromise: Promise<Store> | null = null;
 
 function getStore(): Promise<Store> {
-  storePromise ??= (async () => {
+  if (storePromise) return storePromise;
+
+  const pending = (async () => {
     const store = createStore();
     if (store instanceof MossStore) {
       await store.loadIndex(INDEX_NAME);
     }
     return store;
   })();
-  return storePromise;
+
+  // Cache the success, never the failure. A missing credential or a transient
+  // Moss blip would otherwise pin a rejected promise for the life of the warm
+  // instance, degrading every later query long after the cause cleared.
+  storePromise = pending;
+  pending.catch(() => {
+    if (storePromise === pending) storePromise = null;
+  });
+
+  return pending;
 }
 
 /** Replace the cached store. Tests use this to inject a FakeStore. */
@@ -69,7 +80,7 @@ export async function query(
 ): Promise<QueryResult> {
   const [conditioned, contextWarnings] = applyContext(constraints ?? {});
   const filters = nativeFilters(conditioned, placeId);
-  const radiusM = Number(conditioned.radius_min ?? DEFAULT_RADIUS_MIN) * METRES_PER_RADIUS_MINUTE;
+  const radiusM = radiusMinutes(conditioned.radius_min) * METRES_PER_RADIUS_MINUTE;
 
   let warnings = contextWarnings;
   const startedAt = performance.now();
@@ -165,6 +176,19 @@ function distinctPlaces(candidates: SearchResult[], constraints: Constraints): S
   }
 
   return chunks;
+}
+
+/**
+ * Coerce the caller's radius budget to usable minutes.
+ *
+ * constraints arrive unvalidated from the route body, and a bare Number() maps
+ * a bad value to NaN — which makes every radius comparison false and empties
+ * the result set silently, reading as "nothing nearby" rather than "bad input".
+ * Fall back to the default instead.
+ */
+function radiusMinutes(value: unknown): number {
+  const parsed = Number(value ?? DEFAULT_RADIUS_MIN);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RADIUS_MIN;
 }
 
 /**

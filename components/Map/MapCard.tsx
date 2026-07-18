@@ -34,7 +34,6 @@ export function MapCard({ location, status, error, onRetry }: MapCardProps) {
         {location ? (
           <>
             <iframe
-              key={`${location.latitude}-${location.longitude}`}
               title="Interactive live location map"
               src={getOpenStreetMapEmbedUrl(location)}
               className="h-full w-full border-0"

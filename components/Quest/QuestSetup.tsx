@@ -173,7 +173,6 @@ export function QuestSetup({
             {mapLocation ? (
               <>
                 <iframe
-                  key={`${mapLocation.latitude}-${mapLocation.longitude}`}
                   title="Interactive starting point map"
                   src={getOpenStreetMapEmbedUrl(mapLocation)}
                   className="h-56 w-full border-0"
@@ -217,11 +216,13 @@ export function QuestSetup({
               setSearchQuery("");
               onUseCurrentLocation();
             }}
-            className="mt-4 flex w-full items-center justify-between rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-4 py-3.5 text-left shadow-soft transition hover:border-[#9c3b43] hover:bg-[#f6ead3] active:translate-x-0.5 active:translate-y-0.5"
+            disabled={isRequesting}
+            aria-busy={isRequesting}
+            className="mt-4 flex w-full items-center justify-between rounded-lg border-2 border-[#c7ac84] bg-[#fffaf0] px-4 py-3.5 text-left shadow-soft transition hover:border-[#9c3b43] hover:bg-[#f6ead3] active:translate-x-0.5 active:translate-y-0.5 disabled:cursor-wait disabled:border-[#c7ac84] disabled:bg-[#fffaf0] disabled:opacity-70"
           >
             <span className="flex items-center gap-3">
               <span className="flex size-9 items-center justify-center rounded-lg bg-[#f3dfb8] text-[#9c3b43]">
-                <LocateFixed className="size-4" />
+                {isRequesting ? <Spinner className="size-4" /> : <LocateFixed className="size-4" />}
               </span>
               <span>
                 <span className="block text-xs font-bold text-[#31101b]">

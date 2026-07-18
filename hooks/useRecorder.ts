@@ -37,12 +37,19 @@ export function useRecorder(): UseRecorderResult {
   }, []);
 
   const stopRecording = useCallback(() => {
+    clearTimer();
+
     if (recorderRef.current?.state === "recording") {
+      // Do not release the stream here. stop() only queues the final
+      // dataavailable/onstop; killing the tracks in the same tick can drop the
+      // last chunk, and on some browsers onstop never fires at all — which
+      // strands status on "processing" and disables the mic button for good.
+      // onstop owns teardown instead.
       setStatus("processing");
       recorderRef.current.stop();
+      return;
     }
 
-    clearTimer();
     releaseStream();
   }, [clearTimer, releaseStream]);
 
@@ -79,16 +86,21 @@ export function useRecorder(): UseRecorderResult {
 
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        setRecordingBlob(blob);
-        setStatus("idle");
         recorderRef.current = null;
         chunksRef.current = [];
+        clearTimer();
+        releaseStream();
+        setRecordingBlob(blob);
+        setStatus("idle");
       };
 
       recorder.onerror = () => {
+        recorderRef.current = null;
+        chunksRef.current = [];
+        clearTimer();
+        releaseStream();
         setStatus("error");
         setError("Something interrupted the recording. Please try again.");
-        releaseStream();
       };
 
       recorder.start();
@@ -111,7 +123,7 @@ export function useRecorder(): UseRecorderResult {
       );
       releaseStream();
     }
-  }, [releaseStream, status]);
+  }, [clearTimer, releaseStream, status]);
 
   const clearRecording = useCallback(() => {
     setRecordingBlob(null);
@@ -120,7 +132,18 @@ export function useRecorder(): UseRecorderResult {
   useEffect(() => {
     return () => {
       clearTimer();
-      recorderRef.current?.stop();
+
+      // Detach first: onstop now owns teardown and calls setState, which would
+      // land on an unmounted hook. Release the tracks here instead.
+      const recorder = recorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        recorder.ondataavailable = null;
+        recorder.onerror = null;
+        if (recorder.state !== "inactive") recorder.stop();
+        recorderRef.current = null;
+      }
+
       releaseStream();
     };
   }, [clearTimer, releaseStream]);
