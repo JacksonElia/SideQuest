@@ -9,6 +9,7 @@ Unusual: (1) There is NO database — Moss indexes are the only datastore; metad
 - The current plan is `spec.md` (the milestone plan, M1–M9, three tracks per PROJECT.md). Read it before implementing anything. Implement ONE milestone task at a time — never the whole spec in one pass.
 - All commands (run, test, lint) are in `COMMANDS.md`. **Your first task in M1 is to create it** as the starter's actual commands, then use those exact commands; do not invent alternatives.
 - Track ownership is in PROJECT.md. Stay in your track's files; the merge points are the 1:15 and 3:00 checkpoints, not ad-hoc cross-track edits.
+- Task instructions are provided in each prompt. Verification commands are given per-task. There is no spec.md or COMMANDS.md in this repo.
 
 ## How to work
 
