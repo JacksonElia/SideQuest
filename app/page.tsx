@@ -244,7 +244,7 @@ export default function HomePage() {
 
   return (
     <main className="h-dvh overflow-hidden bg-[#e9dcc6]">
-      <VoiceDebugPanel diagnostics={voice.diagnostics} isAgentSpeaking={voice.isAgentSpeaking} />
+      {/* <VoiceDebugPanel diagnostics={voice.diagnostics} isAgentSpeaking={voice.isAgentSpeaking} /> */}
       <div className="mx-auto flex h-full w-full max-w-md flex-col overflow-hidden bg-[#f7f1e5] shadow-[8px_0_0_rgba(82,30,39,0.08)]">
         <header className="safe-top flex shrink-0 items-center justify-between px-5 pb-2 pt-3">
           <div className="flex min-w-0 items-center gap-2.5">

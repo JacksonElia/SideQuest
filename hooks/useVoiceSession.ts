@@ -139,6 +139,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   const connectingRef = useRef(false);
   const levelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentLocationRef = useRef<ToolCallRequest | null>(null);
+  const assistantTranscriptRef = useRef(new Map<string, string>());
 
   const patchDiagnostics = useCallback((patch: Partial<VoiceDiagnostics>) => {
     setDiagnostics((current) => ({ ...current, ...patch }));
@@ -200,6 +201,22 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     });
   }, []);
 
+  const updateAssistantTranscript = useCallback(
+    (responseId: string, text: string, append: boolean) => {
+      const current = assistantTranscriptRef.current.get(responseId) ?? "";
+      const transcript = append ? current + text : text;
+      assistantTranscriptRef.current.set(responseId, transcript);
+      upsertMessage({
+        id: `assistant-${responseId}`,
+        role: "assistant",
+        kind: "text",
+        text: transcript,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [upsertMessage],
+  );
+
   const teardownRemoteAudio = useCallback(() => {
     const element = remoteAudioRef.current;
     if (element) {
@@ -215,6 +232,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     pcRef.current = null;
     dataChannelRef.current = null;
     connectingRef.current = false;
+    assistantTranscriptRef.current.clear();
     teardownRemoteAudio();
     stopLevelMeter();
 
@@ -368,26 +386,16 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
         case "response.output_audio_transcript.delta": {
           const delta = event.delta;
           if (typeof delta === "string" && delta.length > 0) {
-            upsertMessage({
-              id: `assistant-stream-${String(event.response_id ?? "live")}`,
-              role: "assistant",
-              kind: "text",
-              text: delta,
-              createdAt: new Date().toISOString(),
-            });
+            updateAssistantTranscript(String(event.response_id ?? "live"), delta, true);
           }
           break;
         }
         case "response.output_audio_transcript.done": {
           const transcript = event.transcript;
           if (typeof transcript === "string" && transcript.trim()) {
-            upsertMessage({
-              id: `assistant-${String(event.response_id ?? Date.now())}`,
-              role: "assistant",
-              kind: "text",
-              text: transcript.trim(),
-              createdAt: new Date().toISOString(),
-            });
+            const responseId = String(event.response_id ?? "live");
+            updateAssistantTranscript(responseId, transcript.trim(), false);
+            assistantTranscriptRef.current.delete(responseId);
           }
           break;
         }
@@ -413,7 +421,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           break;
       }
     },
-    [executeToolCall, patchDiagnostics, upsertMessage],
+    [executeToolCall, patchDiagnostics, updateAssistantTranscript, upsertMessage],
   );
 
   const connect = useCallback(async () => {
