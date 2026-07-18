@@ -21,10 +21,7 @@ process.env.SIDEQUEST_API_URL ??= 'http://localhost:3000';
 import { createGuideAgent } from './agent.ts';
 import { fixFromAttributes, fixFromJobMetadata } from './location.ts';
 import { createUserData } from './types.ts';
-import type { TravelProfile, UserData } from './types.ts';
-
-/** Text stream topic the browser listens on to render the settled travel plan. */
-const PROFILE_TOPIC = 'sidequest.profile';
+import type { UserData } from './types.ts';
 
 const STT_MODEL = 'deepgram/nova-3';
 const LLM_MODEL = 'google/gemini-3-flash';
@@ -37,12 +34,6 @@ export default defineAgent({
     // published its first live attribute update.
     const initialFix = fixFromJobMetadata(ctx.job.metadata);
     const userData: UserData = createUserData(initialFix);
-
-    userData.publishProfile = async (profile: TravelProfile) => {
-      await ctx.room.localParticipant?.sendText(JSON.stringify(profile), {
-        topic: PROFILE_TOPIC,
-      });
-    };
 
     const session = new voice.AgentSession<UserData>({
       userData,
@@ -83,11 +74,12 @@ export default defineAgent({
       session.userData.lastFix = joinedFix;
     }
 
-    // Planning mode opens the conversation; the persona owns the wording.
+    // Open the floor rather than opening an intake. The persona owns the
+    // wording; what matters here is that the first turn ends in their hands.
     session.generateReply({
       instructions:
-        'Greet the traveler warmly and briefly, then ask your first planning question about ' +
-        'how long they will be traveling.',
+        'Greet the traveler warmly in one short sentence and invite them to ask you anything ' +
+        'about the city. Do not ask them any questions about themselves or their trip.',
     });
   },
 });

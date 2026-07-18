@@ -93,6 +93,18 @@ function toQuests(value: unknown): Quest[] {
 }
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
+/**
+ * Stands in for the profile the guide used to collect. All-null is a valid
+ * profile server-side and reads as "no stated preferences", which is exactly
+ * true now that nobody is asked.
+ */
+const DEFAULT_PROFILE: TravelProfile = {
+  durationDays: null,
+  interests: [],
+  activityLevel: null,
+  budget: null,
+};
+
 export default function HomePage() {
   // Last-minute demo cut: no welcome/setup/scoping — boot straight into the
   // homepage with the live conversational guide. The other screens remain in
@@ -175,30 +187,15 @@ export default function HomePage() {
   }, [messages, persistJourney]);
 
   /**
-   * The guide decides when planning is done, and says so by saving a profile.
-   * Advancing on that signal keeps the conversation in charge of the flow, which
-   * is what the persona describes. The button stays as a manual override.
-   */
-  const hasAdvancedRef = useRef(false);
-  useEffect(() => {
-    if (screen !== "scoping" || !voice.profile || hasAdvancedRef.current) {
-      return;
-    }
-    hasAdvancedRef.current = true;
-    advanceToMain();
-  }, [advanceToMain, screen, voice.profile]);
-
-  /**
-   * The saved profile is also what the quest plan is built from, so the same
-   * signal that ends planning starts retrieval. The four answers the planner
-   * needs are exactly the four the guide just collected, which is why nothing
-   * here is hardcoded any more.
+   * The guide no longer interviews anyone, so there is no profile to wait on —
+   * a location fix is the only signal retrieval needs. Every planner field is
+   * nullable, and an all-null profile is what "no stated preferences" means.
    */
   const questPlanFetchedRef = useRef(false);
   useEffect(() => {
-    const profile: TravelProfile | null = voice.profile;
+    const profile: TravelProfile = DEFAULT_PROFILE;
     const fix = selectedLocation ?? location;
-    if (!profile || !fix || questPlanFetchedRef.current) {
+    if (!fix || questPlanFetchedRef.current) {
       return;
     }
     questPlanFetchedRef.current = true;
@@ -250,7 +247,7 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [location, locationLabel, selectedLocation, voice.profile]);
+  }, [location, locationLabel, selectedLocation]);
 
   const handleStartNewQuest = () => {
     setRestoredMessages([]);
@@ -258,7 +255,6 @@ export default function HomePage() {
     setLocationLabel("");
     setSelectedLocation(null);
     setIsUsingCurrentLocation(false);
-    hasAdvancedRef.current = false;
     questPlanFetchedRef.current = false;
     setQuestPlaces([]);
     setQuests([]);
@@ -303,7 +299,6 @@ export default function HomePage() {
   const handleCreateQuest = () => {
     const label = locationLabel.trim() || "Current location";
     setLocationLabel(label);
-    hasAdvancedRef.current = false;
     // Best-effort: warm the ingestion pipeline while the traveler is scoping.
     const fix = selectedLocation ?? location;
     if (fix) {
