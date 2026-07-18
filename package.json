@@ -21,7 +21,8 @@
     "fixtures": "node --env-file=.env.local scripts/run-fixtures.ts",
     "smoke": "node --env-file=.env.local scripts/smoke.ts",
     "llm:smoke": "node --env-file=.env.local scripts/llm-smoke.ts",
-    "moss:smoke": "node --env-file=.env.local scripts/moss-smoke.ts"
+    "moss:smoke": "node --env-file=.env.local scripts/moss-smoke.ts",
+    "ingest:sf": "node --env-file=.env.local scripts/ingest-sf.ts"
   },
   "dependencies": {
     "@inferedge/moss": "^1.0.0-beta.8",

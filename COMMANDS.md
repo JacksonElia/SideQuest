@@ -35,6 +35,7 @@ native type stripping, so there is no build step for them. Verified on v24.13.0.
 | `npm run moss:smoke` | Headless: writes and queries a throwaway `smoke-test` index. Proves Moss credentials. |
 | `npm run fixtures` | Replaces the fixture feed in the places index. |
 | `npm run bootstrap` | Fetches Wikipedia extracts for every landmark and reindexes them. |
+| `npm run ingest:sf` | Bulk SF ingestion via Bright Data SERP: restaurants, tech, hidden gems, history, attractions → `sidequest-places`. Needs `BRIGHTDATA_API_KEY`. Replaces the previous `brightdata` feed per category; never touches fixtures. |
 | `npm run agent:install` | Installs the agent worker's dependencies. |
 | `npm run agent:dev` | Runs the voice agent worker in dev mode. Needs `npm run dev` alongside it for Moss lookups. |
 | `npm run agent:start` | Runs the worker in production mode. |
