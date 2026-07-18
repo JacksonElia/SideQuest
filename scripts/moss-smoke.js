@@ -1,5 +1,5 @@
 async function main() {
-  const { searchPlaces } = await import('../src/moss.js');
+  const { searchPlaces } = await import('../lib/server/moss.js');
   const results = await searchPlaces('museum of modern art');
   console.log(JSON.stringify(results, null, 2));
 }
