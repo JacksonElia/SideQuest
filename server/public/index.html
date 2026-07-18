@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sidequest — LiveKit test client</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 15px/1.5 ui-sans-serif, system-ui, sans-serif;
+        max-width: 46rem; margin: 2rem auto; padding: 0 1rem;
+      }
+      h1 { font-size: 1.25rem; margin-bottom: .25rem; }
+      .sub { opacity: .7; margin-top: 0; }
+      button { font: inherit; padding: .6rem 1.1rem; border-radius: .5rem; cursor: pointer; }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+      #tap { font-size: 1.05rem; font-weight: 600; }
+      .row { display: flex; gap: .5rem; align-items: center; margin: 1rem 0; flex-wrap: wrap; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .8rem; margin: 0; }
+      dt { opacity: .65; }
+      dd { margin: 0; font-variant-numeric: tabular-nums; }
+      #log {
+        margin-top: 1rem; padding: .75rem; border-radius: .5rem;
+        background: color-mix(in srgb, currentColor 7%, transparent);
+        font-family: ui-monospace, monospace; font-size: 12.5px;
+        white-space: pre-wrap; max-height: 22rem; overflow-y: auto;
+      }
+      .err { color: #d33; }
+      @media (prefers-color-scheme: dark) { .err { color: #f88; } }
+    </style>
+  </head>
+  <body>
+    <h1>Sidequest — LiveKit test client</h1>
+    <p class="sub">
+      Verifies the backend end to end: token → dispatch → agent joins → live GPS
+      arrives as participant attributes. Not the real UI.
+    </p>
+
+    <div class="row">
+      <button id="tap">Where am I?</button>
+      <button id="stop" disabled>Disconnect</button>
+    </div>
+
+    <dl>
+      <dt>Connection</dt><dd id="s-conn">idle</dd>
+      <dt>Room</dt><dd id="s-room">—</dd>
+      <dt>Agent</dt><dd id="s-agent">—</dd>
+      <dt>Fix</dt><dd id="s-fix">—</dd>
+      <dt>Published</dt><dd id="s-pub">0</dd>
+    </dl>
+
+    <div id="log"></div>
+
+    <script type="module">
+      // Served from node_modules by the local server — no CDN, no bundler.
+      import { Room, RoomEvent, Track } from '/vendor/livekit-client.mjs';
+
+      // Same gating logic the server tests cover. Kept in sync by hand for now;
+      // it moves into a shared module when the Next.js app lands.
+      const MIN_PUBLISH_INTERVAL_MS = 5000;
+      const MIN_PUBLISH_DISTANCE_M = 25;
+
+      const $ = (id) => document.getElementById(id);
+      const logEl = $('log');
+
+      function log(msg, isError = false) {
+        const line = document.createElement('div');
+        line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+        if (isError) line.className = 'err';
+        logEl.append(line);
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function haversineMeters(a, b) {
+        const toRad = (d) => (d * Math.PI) / 180;
+        const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+        const dLat = lat2 - lat1, dLng = toRad(b.lng - a.lng);
+        const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+        return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(h)));
+      }
+
+      function encodeLocationAttributes({ lat, lng, accuracy, ts }) {
+        const attrs = {
+          'sidequest.lat': String(Number(lat.toFixed(5))),
+          'sidequest.lng': String(Number(lng.toFixed(5))),
+          'sidequest.fix_ts': String(ts),
+        };
+        if (accuracy != null) attrs['sidequest.accuracy_m'] = String(Number(accuracy.toFixed(1)));
+        return attrs;
+      }
+
+      const getPosition = (opts) =>
+        new Promise((resolve, reject) =>
+          navigator.geolocation.getCurrentPosition(resolve, reject, opts),
+        );
+
+      let room = null;
+      let watchId = null;
+      let lastPublished = null;
+      let publishCount = 0;
+
+      async function start() {
+        $('tap').disabled = true;
+
+        if (!navigator.geolocation) {
+          log('This browser has no Geolocation API.', true);
+          $('tap').disabled = false;
+          return;
+        }
+
+        // Chrome and Safari only expose geolocation on a secure origin.
+        // http://localhost counts as secure; a LAN IP does not.
+        if (!window.isSecureContext) {
+          log('Insecure origin — geolocation will be blocked. Use http://localhost.', true);
+        }
+
+        let fix;
+        try {
+          $('s-conn').textContent = 'requesting location…';
+          const pos = await getPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+          fix = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            ts: Date.now(),
+          };
+          $('s-fix').textContent =
+            `${fix.lat.toFixed(5)}, ${fix.lng.toFixed(5)} (±${Math.round(fix.accuracy)}m)`;
+          log(`got fix ±${Math.round(fix.accuracy)}m`);
+        } catch (err) {
+          log(`geolocation failed: ${err.message}`, true);
+          $('s-conn').textContent = 'idle';
+          $('tap').disabled = false;
+          return;
+        }
+
+        let session;
+        try {
+          $('s-conn').textContent = 'minting token…';
+          const res = await fetch('/session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy }),
+          });
+          session = await res.json();
+          if (!res.ok) throw new Error(session.error ?? `HTTP ${res.status}`);
+        } catch (err) {
+          log(`session failed: ${err.message}`, true);
+          $('s-conn').textContent = 'idle';
+          $('tap').disabled = false;
+          return;
+        }
+
+        $('s-room').textContent = session.roomName;
+        $('s-agent').textContent = session.agentDispatched
+          ? 'dispatched, waiting to join…'
+          : `dispatch FAILED — ${session.dispatchError}`;
+        if (!session.agentDispatched) {
+          log(`agent dispatch failed: ${session.dispatchError}`, true);
+        }
+
+        room = new Room({ adaptiveStream: true, dynacast: true });
+
+        room.on(RoomEvent.ParticipantConnected, (p) => {
+          log(`participant joined: ${p.identity}`);
+          $('s-agent').textContent = `joined: ${p.identity}`;
+        });
+
+        room.on(RoomEvent.TrackSubscribed, (track, _pub, participant) => {
+          if (track.kind === Track.Kind.Audio) {
+            // Attaching to a detached element is enough for playback.
+            document.body.append(track.attach());
+            log(`audio from ${participant.identity} — agent is speaking`);
+          }
+        });
+
+        room.on(RoomEvent.Disconnected, (reason) => {
+          log(`disconnected: ${reason ?? 'unknown'}`);
+          $('s-conn').textContent = 'idle';
+        });
+
+        try {
+          $('s-conn').textContent = 'connecting…';
+          await room.connect(session.serverUrl, session.token);
+          await room.localParticipant.setMicrophoneEnabled(true);
+          $('s-conn').textContent = `connected as ${session.identity}`;
+          log(`connected to ${session.roomName}, mic live`);
+        } catch (err) {
+          log(`connect failed: ${err.message}`, true);
+          $('s-conn').textContent = 'idle';
+          $('tap').disabled = false;
+          return;
+        }
+
+        // The token already carries the first fix, so the agent is never
+        // location-blind on its opening turn.
+        lastPublished = fix;
+        publishCount = 1;
+        $('s-pub').textContent = String(publishCount);
+
+        // Movement updates, gated on time AND distance. LiveKit's docs warn
+        // attributes are not for high-frequency updates.
+        watchId = navigator.geolocation.watchPosition(
+          async (pos) => {
+            const next = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              ts: Date.now(),
+            };
+            $('s-fix').textContent =
+              `${next.lat.toFixed(5)}, ${next.lng.toFixed(5)} (±${Math.round(next.accuracy)}m)`;
+
+            const elapsed = next.ts - lastPublished.ts;
+            if (elapsed < MIN_PUBLISH_INTERVAL_MS) return;
+            if (haversineMeters(lastPublished, next) < MIN_PUBLISH_DISTANCE_M) return;
+
+            try {
+              await room.localParticipant.setAttributes(encodeLocationAttributes(next));
+              lastPublished = next;
+              $('s-pub').textContent = String(++publishCount);
+              log(`published new fix (moved ≥${MIN_PUBLISH_DISTANCE_M}m)`);
+            } catch (err) {
+              // Almost always a missing canUpdateOwnMetadata grant.
+              log(`setAttributes failed: ${err.message}`, true);
+            }
+          },
+          (err) => log(`watchPosition error: ${err.message}`, true),
+          { enableHighAccuracy: true, maximumAge: 0 },
+        );
+
+        $('stop').disabled = false;
+      }
+
+      async function stop() {
+        if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        await room?.disconnect();
+        room = null;
+        lastPublished = null;
+        $('stop').disabled = true;
+        $('tap').disabled = false;
+      }
+
+      $('tap').addEventListener('click', start);
+      $('stop').addEventListener('click', stop);
+    </script>
+  </body>
+</html>
