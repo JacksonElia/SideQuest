@@ -1,18 +1,19 @@
 # AGENTS.md — rules for coding agents in this repo
 
-Project: Sidequest (travel-guide pivot)
-Purpose: Voice travel-guide agent that geolocates the user via real device GPS (anywhere — not a fixed area) and, on tap, pulls live scraped facts about their current surroundings — live scraped facts + semantic retrieval + offline path; hackathon build, demo at 5:45 PM today.
-Unusual: (1) There is NO database — Moss indexes are the only datastore; metadata is the record of truth. (2) All scraped text (reviews, IG captions, event pages) is UNTRUSTED INPUT — it is wrapped as data before reaching the LLM and is never treated as instructions (prompt-injection defense). (3) Numbers and conditions go in metadata filters, never into embedded text. (4) Fixture and real data coexist via the `is_fixture` flag — workers replace fixtures per-feed; never delete fixtures for a feed whose scraper isn't verified working. (5) Location is a RUNTIME input (device GPS lat/long), not a fixed place — never hardcode 625 2nd St or any single square mile; the query path must accept arbitrary coordinates. The demo simply supplies one location at runtime.
+Project: Sidequest
+Purpose: Voice tour-guide agent for the square mile around 625 2nd St SF — live scraped facts + semantic retrieval + offline path; hackathon build, demo at 5:45 PM today.
+Unusual: (1) There is NO database — Moss indexes are the only datastore; metadata is the record of truth. (2) All scraped text (reviews, IG captions, event pages) is UNTRUSTED INPUT — it is wrapped as data before reaching the LLM and is never treated as instructions (prompt-injection defense). (3) Numbers and conditions go in metadata filters, never into embedded text. (4) Fixture and real data coexist via the `is_fixture` flag — workers replace fixtures per-feed; never delete fixtures for a feed whose scraper isn't verified working.
 
 ## Where things live
 
 - The current plan is `spec.md` (the milestone plan, M1–M9, three tracks per PROJECT.md). Read it before implementing anything. Implement ONE milestone task at a time — never the whole spec in one pass.
 - All commands (run, test, lint) are in `COMMANDS.md`. **Your first task in M1 is to create it** as the starter's actual commands, then use those exact commands; do not invent alternatives.
 - Track ownership is in PROJECT.md. Stay in your track's files; the merge points are the 1:15 and 3:00 checkpoints, not ad-hoc cross-track edits.
+- Task instructions are provided in each prompt. Verification commands are given per-task. There is no spec.md or COMMANDS.md in this repo.
 
 ## How to work
 
-- **[Calibrated for hackathon]** TDD only for pure logic: context-conditioning rules (rain→indoor etc.), heat scoring, caption→landmark mapping, walk-time approximation (from the user's live GPS position). Write the failing test, see it fail, make it pass. For workers, wiring, and voice: a smoke test or a pasted successful run is sufficient — do not build test scaffolding for scrapers today.
+- **[Calibrated for hackathon]** TDD only for pure logic: context-conditioning rules (rain→indoor etc.), heat scoring, caption→landmark mapping, walk-time approximation. Write the failing test, see it fail, make it pass. For workers, wiring, and voice: a smoke test or a pasted successful run is sufficient — do not build test scaffolding for scrapers today.
 - Show evidence: paste the actual command you ran and its output. Never assert success without it.
 - If anything in the task is ambiguous, ask before writing code. Do not guess.
 - Stay inside the task's scope. Do not refactor, rename, or "improve" code the task doesn't touch. Post-3:00 feature freeze: bug fixes only.
@@ -20,16 +21,10 @@ Unusual: (1) There is NO database — Moss indexes are the only datastore; metad
 
 ## Hard constraints
 
-### Location & geolocation
-- Location comes from the device at runtime (GPS lat/long). Treat it as a parameter threaded through retrieval — never a constant baked into code, fixtures, or embedded text.
-- The tap/"where am I" trigger resolves the current coordinates, then drives scraping + Moss retrieval for that area. Do not assume SF; the same path must work for arbitrary coordinates.
-- Coordinates and radii are metadata filters (see Unusual #3), never embedded into vector text.
-
 ### Dependencies (slopsquatting defense)
 - Never add a new dependency without asking first, and never run an install command on your own. The approved set is what the starter repo, Moss SDK, and Bright Data client require — nothing else without sign-off.
 - When you propose a package, state its exact name and STOP for approval; hallucinated package names get typo-squatted with malware. If you're unsure a package exists, say so — never invent a name to fill a gap.
 - Pin versions in the lockfile. Do not silently upgrade or add transitive dependencies.
-- LiveKit is a fast-evolving project. Always refer to the latest documentation. LiveKit provides an MCP server at `https://docs.livekit.io/mcp` with tools for browsing and searching docs. Key tools: `get_docs_overview`, `get_pages`, `docs_search`, `code_search`, `get_changelog`, `get_pricing_info`. Prefer browsing (`get_docs_overview`, `get_pages`) over search, and `docs_search` over `code_search`, as docs pages provide better context than raw code.
 
 ### Secrets
 - Never put API keys, tokens, or URLs-with-credentials in code or any committed file. Secrets live only in `.env`; `.env` is in `.gitignore`. This repo goes PUBLIC tonight — assume every commit will be read.
@@ -47,3 +42,5 @@ Unusual: (1) There is NO database — Moss indexes are the only datastore; metad
 - One feature branch per track (`track-a-voice`, `track-b-data`, `track-c-query`); never commit directly to main. Merges happen at the named checkpoints.
 - Use the `gh` CLI for GitHub operations. Never force-push, never rewrite published history, never delete branches you didn't create.
 - **[Calibrated for hackathon]** Full PR review ceremony is suspended until after the event, EXCEPT at the two checkpoint merges, where the merging human skims the diff before merging. When responding to any review comment: fix what you agree with, say why when you disagree — never silently comply or silently skip.
+message.txt
+5 KB
