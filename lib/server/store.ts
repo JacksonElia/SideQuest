@@ -81,13 +81,13 @@ const TOKEN_PATTERN = /\b\w+\b/g;
 /**
  * Build the configured backend.
  *
- * Defaults to `moss`, unlike the Python original which defaulted to `fake`.
- * That default meant a missing STORE_BACKEND silently served in-memory results
- * from the real query path — the failure looked like working software. Now a
- * misconfigured deploy fails loudly in MossStore's constructor instead.
+ * Hackathon hardcoding: defaults to `fake` so the demo runs entirely from the
+ * hardcoded places database (lib/server/query.ts seeds the fake store from
+ * data/landmarks.json) with no Moss credentials or network dependency. Set
+ * STORE_BACKEND=moss to opt back into the real backend.
  */
 export function createStore(backend?: string): Store {
-  const selected = (backend ?? process.env.STORE_BACKEND ?? 'moss').toLowerCase();
+  const selected = (backend ?? process.env.STORE_BACKEND ?? 'fake').toLowerCase();
   if (selected === 'fake') return new FakeStore();
   if (selected === 'moss') return new MossStore();
   throw new Error(`Unsupported STORE_BACKEND: ${selected}`);

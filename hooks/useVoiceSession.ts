@@ -14,13 +14,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ConnectionState,
   RemoteAudioTrack,
   Room,
   RoomEvent,
   Track,
+  type LocalTrackPublication,
+  type Participant,
   type RemoteParticipant,
   type RemoteTrack,
   type RemoteTrackPublication,
+  type TrackPublication,
 } from "livekit-client";
 import {
   encodeLocationAttributes,
@@ -30,6 +34,49 @@ import {
 import type { LocationCoordinates, Message, TravelProfile } from "@/types/message";
 
 export type VoiceStatus = "idle" | "connecting" | "connected" | "error";
+
+/**
+ * Fine-grained signals for debugging a silent microphone. `status` collapses
+ * everything into four coarse states, which makes a dead mic look identical to
+ * a working one — these separate "we never published audio" from "the agent
+ * never joined" from "the server hears nothing".
+ */
+export interface VoiceDiagnostics {
+  /** Live LiveKit connection state, more granular than `status`. */
+  connectionState: ConnectionState;
+  /** True once a local microphone track is actually published to the room. */
+  micPublished: boolean;
+  /** getUserMedia-level failure, e.g. "NotAllowedError: Permission denied". */
+  micDeviceError: string | null;
+  /** Local input RMS, 0..1, sampled ~10x/s. Moving means the mic hardware works. */
+  micLevel: number;
+  /** True while the server counts US among active speakers — proof audio arrives. */
+  userSpeaking: boolean;
+  /** True while any remote participant (the agent worker) is in the room. */
+  agentPresent: boolean;
+  /**
+   * The worker's own pipeline state (lk.agent.state attribute): initializing,
+   * listening, thinking, or speaking. Stuck on "thinking" means the LLM/TTS leg
+   * is failing; never leaving "listening" means our turn never commits.
+   */
+  agentState: string | null;
+  /** True once we've subscribed to a remote audio track. */
+  agentAudioSubscribed: boolean;
+  /** The published track's own muted flag, distinct from user-intent `isMuted`. */
+  micTrackMuted: boolean;
+}
+
+const INITIAL_DIAGNOSTICS: VoiceDiagnostics = {
+  connectionState: ConnectionState.Disconnected,
+  micPublished: false,
+  micDeviceError: null,
+  micLevel: 0,
+  userSpeaking: false,
+  agentPresent: false,
+  agentState: null,
+  agentAudioSubscribed: false,
+  micTrackMuted: false,
+};
 
 interface SessionResponse {
   serverUrl: string;
@@ -47,6 +94,7 @@ interface UseVoiceSessionResult {
   agentDispatched: boolean;
   isMuted: boolean;
   isAgentSpeaking: boolean;
+  diagnostics: VoiceDiagnostics;
   messages: Message[];
   profile: TravelProfile | null;
   connect: () => Promise<void>;
@@ -74,6 +122,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   const [agentDispatched, setAgentDispatched] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [isAgentSpeaking, setIsAgentSpeaking] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<VoiceDiagnostics>(INITIAL_DIAGNOSTICS);
   const [messages, setMessages] = useState<Message[]>([]);
   const [profile, setProfile] = useState<TravelProfile | null>(null);
 
@@ -83,6 +132,60 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   const audioElementsRef = useRef<HTMLAudioElement[]>([]);
   /** Guards against a second connect racing the first (double tap, StrictMode). */
   const connectingRef = useRef(false);
+  // Level-meter plumbing: torn down together whenever the room goes away.
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const levelIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const patchDiagnostics = useCallback((patch: Partial<VoiceDiagnostics>) => {
+    setDiagnostics((current) => ({ ...current, ...patch }));
+  }, []);
+
+  const stopLevelMeter = useCallback(() => {
+    if (levelIntervalRef.current !== null) {
+      clearInterval(levelIntervalRef.current);
+      levelIntervalRef.current = null;
+    }
+    void audioContextRef.current?.close().catch(() => {});
+    audioContextRef.current = null;
+  }, []);
+
+  /**
+   * Tap the published mic track with a Web Audio analyser so the UI can show
+   * real input energy — the one signal that distinguishes "browser is capturing
+   * audio" from "track exists but is silent".
+   */
+  const startLevelMeter = useCallback(
+    (mediaStreamTrack: MediaStreamTrack) => {
+      stopLevelMeter();
+      const audioContext = new AudioContext();
+      // New contexts can start "suspended"; connect began with a tap, so the
+      // browser allows resuming here.
+      void audioContext.resume().catch(() => {});
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      audioContext
+        .createMediaStreamSource(new MediaStream([mediaStreamTrack]))
+        .connect(analyser);
+      audioContextRef.current = audioContext;
+
+      const samples = new Uint8Array(analyser.fftSize);
+      // An interval, not rAF, so the meter keeps running in background tabs.
+      levelIntervalRef.current = setInterval(() => {
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        for (let i = 0; i < samples.length; i += 1) {
+          const centered = (samples[i] - 128) / 128;
+          sum += centered * centered;
+        }
+        // Speech RMS rarely exceeds ~0.25, so boost it into a readable 0..1.
+        const level = Math.min(1, Math.sqrt(sum / samples.length) * 4);
+        setDiagnostics((current) =>
+          current.micLevel === level ? current : { ...current, micLevel: level },
+        );
+      }, 100);
+    },
+    [stopLevelMeter],
+  );
 
   // Read inside callbacks without making them depend on every position update.
   const locationRef = useRef(location);
@@ -114,11 +217,13 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     lastPublishedRef.current = null;
     connectingRef.current = false;
     teardownAudio();
+    stopLevelMeter();
     setStatus("idle");
     setIsAgentSpeaking(false);
     setIsMuted(false);
+    setDiagnostics(INITIAL_DIAGNOSTICS);
     await room?.disconnect();
-  }, [teardownAudio]);
+  }, [stopLevelMeter, teardownAudio]);
 
   const connect = useCallback(async () => {
     if (roomRef.current || connectingRef.current) return;
@@ -171,6 +276,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
         // needs to enter the React tree.
         const element = track.attach();
         audioElementsRef.current.push(element as HTMLAudioElement);
+        patchDiagnostics({ agentAudioSubscribed: true });
       },
     );
 
@@ -178,14 +284,61 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
       setIsAgentSpeaking(
         speakers.some((speaker) => speaker.identity !== localIdentityRef.current),
       );
+      // The server only lists speakers whose audio it is actually receiving, so
+      // this going true is end-to-end proof the mic pipeline works.
+      patchDiagnostics({
+        userSpeaking: speakers.some(
+          (speaker) => speaker.identity === localIdentityRef.current,
+        ),
+      });
     });
+
+    room.on(RoomEvent.ConnectionStateChanged, (state: ConnectionState) => {
+      patchDiagnostics({ connectionState: state });
+    });
+
+    room.on(RoomEvent.MediaDevicesError, (mediaError: Error) => {
+      // Keep the name: NotAllowedError (permission denied) reads very
+      // differently from NotFoundError (no device at all).
+      patchDiagnostics({ micDeviceError: `${mediaError.name}: ${mediaError.message}` });
+    });
+
+    room.on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
+      if (publication.source !== Track.Source.Microphone) return;
+      patchDiagnostics({ micPublished: true, micTrackMuted: publication.isMuted });
+      const mediaStreamTrack = publication.track?.mediaStreamTrack;
+      if (mediaStreamTrack) startLevelMeter(mediaStreamTrack);
+    });
+
+    const syncAgentPresence = () => {
+      patchDiagnostics({ agentPresent: room.remoteParticipants.size > 0 });
+    };
+    room.on(RoomEvent.ParticipantConnected, syncAgentPresence);
+    room.on(RoomEvent.ParticipantDisconnected, syncAgentPresence);
+
+    // The worker publishes its pipeline position (listening/thinking/speaking)
+    // as an attribute, which is the closest thing to a heartbeat it has.
+    room.on(RoomEvent.ParticipantAttributesChanged, (_changed, participant) => {
+      if (participant.isLocal) return;
+      const state = participant.attributes["lk.agent.state"];
+      if (state) patchDiagnostics({ agentState: state });
+    });
+
+    const syncMicMuted = (muted: boolean) => (publication: TrackPublication, participant: Participant) => {
+      if (!participant.isLocal || publication.source !== Track.Source.Microphone) return;
+      patchDiagnostics({ micTrackMuted: muted });
+    };
+    room.on(RoomEvent.TrackMuted, syncMicMuted(true));
+    room.on(RoomEvent.TrackUnmuted, syncMicMuted(false));
 
     room.on(RoomEvent.Disconnected, () => {
       roomRef.current = null;
       connectingRef.current = false;
       teardownAudio();
+      stopLevelMeter();
       setStatus("idle");
       setIsAgentSpeaking(false);
+      setDiagnostics(INITIAL_DIAGNOSTICS);
     });
 
     // Handlers are registered before connect so nothing published during the
@@ -224,9 +377,40 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     try {
       await room.connect(session.serverUrl, session.token);
       await room.localParticipant.setMicrophoneEnabled(true);
+
+      // setMicrophoneEnabled resolves even in the cases where no track ends up
+      // published (a device grabbed by another tab, a permission that resolves
+      // to an empty device list). Without this the UI says "Listening" over a
+      // microphone the guide can never hear.
+      const micTrack = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      if (!micTrack?.track) {
+        throw new Error(
+          "Your microphone did not publish. Check that no other app or tab is using it, then try again.",
+        );
+      }
+
+      // Belt-and-braces alongside LocalTrackPublished: the event can fire
+      // before our listener in some paths, so sync from the publication itself.
+      const remoteAgent = room.remoteParticipants.values().next().value;
+      patchDiagnostics({
+        connectionState: room.state,
+        micPublished: true,
+        micTrackMuted: micTrack.isMuted,
+        agentPresent: room.remoteParticipants.size > 0,
+        agentState: remoteAgent?.attributes["lk.agent.state"] ?? null,
+      });
+      if (!audioContextRef.current) {
+        startLevelMeter(micTrack.track.mediaStreamTrack);
+      }
     } catch (err) {
       connectingRef.current = false;
       await room.disconnect();
+      stopLevelMeter();
+      // The Disconnected reset above wipes diagnostics, but a getUserMedia
+      // failure is exactly what the debug panel exists to show — keep it.
+      if (err instanceof DOMException) {
+        patchDiagnostics({ micDeviceError: `${err.name}: ${err.message}` });
+      }
       setStatus("error");
       setError(err instanceof Error ? err.message : "Could not connect to your guide.");
       return;
@@ -240,7 +424,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     connectingRef.current = false;
     setIsMuted(false);
     setStatus("connected");
-  }, [teardownAudio, upsertMessage]);
+  }, [patchDiagnostics, startLevelMeter, stopLevelMeter, teardownAudio, upsertMessage]);
 
   const toggleMute = useCallback(async () => {
     const room = roomRef.current;
@@ -301,8 +485,9 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
     return () => {
       void roomRef.current?.disconnect();
       roomRef.current = null;
+      stopLevelMeter();
     };
-  }, []);
+  }, [stopLevelMeter]);
 
   return useMemo(
     () => ({
@@ -311,6 +496,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
       agentDispatched,
       isMuted,
       isAgentSpeaking,
+      diagnostics,
       messages,
       profile,
       connect,
@@ -324,6 +510,7 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
       agentDispatched,
       isMuted,
       isAgentSpeaking,
+      diagnostics,
       messages,
       profile,
       connect,

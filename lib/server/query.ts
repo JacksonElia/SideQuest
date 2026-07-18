@@ -4,9 +4,10 @@
  * Ported from the original agent/query.py.
  */
 
-import { createStore, MossStore } from './store.ts';
-import type { SearchResult, Store } from './store.ts';
+import { createStore, FakeStore, MossStore } from './store.ts';
+import type { Document, SearchResult, Store } from './store.ts';
 import { applyContext as applyContextRules } from './context.ts';
+import landmarks from '../../data/landmarks.json';
 
 export const INDEX_NAME = 'sidequest-places';
 const CANDIDATE_COUNT = 100;
@@ -51,6 +52,11 @@ function getStore(): Promise<Store> {
     if (store instanceof MossStore) {
       await store.loadIndex(INDEX_NAME);
     }
+    // Hackathon hardcoding: the fake backend starts empty, so fill it with the
+    // hardcoded places database. This is what the voice guide answers from.
+    if (store instanceof FakeStore) {
+      await store.addDocs(INDEX_NAME, hardcodedPlaceDocs());
+    }
     return store;
   })();
 
@@ -68,6 +74,60 @@ function getStore(): Promise<Store> {
 /** Replace the cached store. Tests use this to inject a FakeStore. */
 export function setStore(store: Store | null): void {
   storePromise = store ? Promise.resolve(store) : null;
+}
+
+/**
+ * Searchable vocabulary per place kind, matched against the traveler's
+ * utterance by the fake store's token-overlap scorer. The words mirror how
+ * people actually ask ("somewhere to eat", "a quiet coffee shop").
+ */
+const KIND_SEARCH_TEXT: Record<string, string> = {
+  park: 'park green space garden outdoor relax walk sit grass picnic quiet nature',
+  restaurant: 'restaurant food eat meal lunch dinner brunch drinks beer bar dining',
+  cafe: 'cafe coffee shop espresso latte tea pastry quiet sit read work',
+  museum: 'museum art culture history exhibit exhibition collection see',
+  gallery: 'gallery art artwork exhibit creative culture see',
+  market: 'market food vendors stalls local fresh produce shopping eat snack',
+  landmark: 'landmark sight attraction visit see famous historic architecture explore',
+};
+
+/** One synthetic, keyword-rich document per hardcoded landmark. */
+function hardcodedPlaceDocs(): Document[] {
+  const fetchedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  return landmarks.map((place) => {
+    const parts = [
+      `${place.name} is a ${place.kind} in the neighborhood.`,
+      KIND_SEARCH_TEXT[place.kind] ?? place.kind,
+      place.indoor ? 'indoor inside covered' : 'outdoor outside open air',
+    ];
+    if (place.viewpoint) parts.push('view viewpoint scenic overlook skyline bay water waterfront');
+    if (place.photogenic) parts.push('photo photos picture photogenic beautiful pretty');
+
+    return {
+      text: parts.join(' '),
+      metadata: {
+        place_id: place.place_id,
+        name: place.name,
+        lat: place.lat,
+        lng: place.lng,
+        kind: place.kind,
+        indoor: place.indoor,
+        viewpoint: place.viewpoint,
+        photogenic: place.photogenic,
+        wind_exposed: place.wind_exposed,
+        busyness_pct: 0,
+        busyness_at: fetchedAt,
+        heat_score: 1,
+        open_now: true,
+        event_time: null,
+        lang: 'en',
+        source: 'hardcoded',
+        fetched_at: fetchedAt,
+        is_fixture: false,
+      },
+    };
+  });
 }
 
 /** Return up to five distinct nearby places ranked by semantic relevance. */

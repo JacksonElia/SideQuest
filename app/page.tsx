@@ -1,27 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Home, MapPin, ScrollText } from "lucide-react";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
-import { TravelPlanCard } from "@/components/Plan/TravelPlanCard";
 import { QuestScoping } from "@/components/Quest/QuestScoping";
 import { QuestSetup } from "@/components/Quest/QuestSetup";
 import { QuestWelcome } from "@/components/Quest/QuestWelcome";
 import { VoiceButton } from "@/components/Voice/VoiceButton";
+import { VoiceDebugPanel } from "@/components/Voice/VoiceDebugPanel";
 import { useLocation } from "@/hooks/useLocation";
 import { useVoiceSession } from "@/hooks/useVoiceSession";
-import type { QuestPlace } from "@/components/Plan/TravelPlanCard";
-import type { LocationCoordinates, Message, Quest, TravelProfile } from "@/types/message";
+import type { LocationCoordinates, Message, Quest } from "@/types/message";
 
 type QuestScreen = "welcome" | "setup" | "scoping" | "main";
-
-interface QuestPlanResponse {
-  queries?: unknown;
-  places?: unknown;
-  quests?: unknown;
-  error?: unknown;
-}
 
 interface SavedJourney {
   questName: string;
@@ -31,41 +23,8 @@ interface SavedJourney {
 }
 
 const JOURNEY_STORAGE_KEY = "sidequest-journey";
-const MAX_PLACE_DETAIL_CHARS = 120;
 
-/**
- * Narrow the retrieved chunks down to what the plan card renders.
- *
- * The response is server data rather than a typed contract at this boundary, so
- * anything without a usable name is dropped instead of rendering as "undefined".
- */
-function toQuestPlaces(value: unknown): QuestPlace[] {
-  if (!Array.isArray(value)) return [];
-
-  const places: QuestPlace[] = [];
-  for (const chunk of value) {
-    if (typeof chunk !== "object" || chunk === null) continue;
-
-    const { metadata, text } = chunk as { metadata?: unknown; text?: unknown };
-    const name =
-      typeof metadata === "object" && metadata !== null
-        ? (metadata as { name?: unknown }).name
-        : undefined;
-    if (typeof name !== "string" || !name.trim()) continue;
-
-    const detail = typeof text === "string" && text.trim() ? text.trim() : null;
-    places.push({
-      name: name.trim(),
-      detail: detail && detail.length > MAX_PLACE_DETAIL_CHARS
-        ? `${detail.slice(0, MAX_PLACE_DETAIL_CHARS).trimEnd()}…`
-        : detail,
-    });
-  }
-
-  return places;
-}
-
-/** Narrow the server's quest suggestions the same way places are narrowed. */
+/** Narrow the saved quest suggestions restored from localStorage. */
 function toQuests(value: unknown): Quest[] {
   if (!Array.isArray(value)) return [];
 
@@ -93,18 +52,6 @@ function toQuests(value: unknown): Quest[] {
 }
 const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidewalk Symphony"];
 
-/**
- * Stands in for the profile the guide used to collect. All-null is a valid
- * profile server-side and reads as "no stated preferences", which is exactly
- * true now that nobody is asked.
- */
-const DEFAULT_PROFILE: TravelProfile = {
-  durationDays: null,
-  interests: [],
-  activityLevel: null,
-  budget: null,
-};
-
 export default function HomePage() {
   // Last-minute demo cut: no welcome/setup/scoping — boot straight into the
   // homepage with the live conversational guide. The other screens remain in
@@ -116,12 +63,8 @@ export default function HomePage() {
   const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
   /** Transcript restored from a previous visit, shown above the live one. */
   const [restoredMessages, setRestoredMessages] = useState<Message[]>([]);
-  /** Stops retrieved for the quest, once the guide has saved a profile. */
-  const [questPlaces, setQuestPlaces] = useState<QuestPlace[]>([]);
-  /** Quest suggestions generated from the retrieved stops. */
+  /** Quest names restored from a previous visit; nothing generates new ones. */
   const [quests, setQuests] = useState<Quest[]>([]);
-  const [isLoadingPlaces, setIsLoadingPlaces] = useState(false);
-  const [placesError, setPlacesError] = useState<string | null>(null);
 
   const {
     location,
@@ -186,80 +129,13 @@ export default function HomePage() {
     setScreen("main");
   }, [messages, persistJourney]);
 
-  /**
-   * The guide no longer interviews anyone, so there is no profile to wait on —
-   * a location fix is the only signal retrieval needs. Every planner field is
-   * nullable, and an all-null profile is what "no stated preferences" means.
-   */
-  const questPlanFetchedRef = useRef(false);
-  useEffect(() => {
-    const profile: TravelProfile = DEFAULT_PROFILE;
-    const fix = selectedLocation ?? location;
-    if (!fix || questPlanFetchedRef.current) {
-      return;
-    }
-    questPlanFetchedRef.current = true;
-
-    // Latch rather than abort: the profile arrives once per conversation, and a
-    // late response is still the right answer for the plan on screen.
-    let cancelled = false;
-    setIsLoadingPlaces(true);
-    setPlacesError(null);
-
-    void (async () => {
-      try {
-        const response = await fetch("/api/quest-plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            locationLabel: locationLabel || "Current location",
-            lat: fix.latitude,
-            lng: fix.longitude,
-            profile,
-          }),
-        });
-
-        const body = (await response.json()) as QuestPlanResponse;
-        if (cancelled) return;
-
-        if (!response.ok) {
-          setPlacesError(
-            typeof body.error === "string" ? body.error : "Could not build your quest plan.",
-          );
-          return;
-        }
-
-        setQuestPlaces(toQuestPlaces(body.places));
-        const nextQuests = toQuests(body.quests);
-        setQuests(nextQuests);
-        if (nextQuests[0]?.name) {
-          setQuestName(nextQuests[0].name);
-        }
-      } catch {
-        if (!cancelled) {
-          setPlacesError("Could not reach the quest planner.");
-        }
-      } finally {
-        if (!cancelled) setIsLoadingPlaces(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [location, locationLabel, selectedLocation]);
-
   const handleStartNewQuest = () => {
     setRestoredMessages([]);
     setQuestName("The Little Detour");
     setLocationLabel("");
     setSelectedLocation(null);
     setIsUsingCurrentLocation(false);
-    questPlanFetchedRef.current = false;
-    setQuestPlaces([]);
     setQuests([]);
-    setPlacesError(null);
-    setIsLoadingPlaces(false);
     setScreen("setup");
   };
 
@@ -368,6 +244,7 @@ export default function HomePage() {
 
   return (
     <main className="h-dvh overflow-hidden bg-[#e9dcc6]">
+      <VoiceDebugPanel diagnostics={voice.diagnostics} isAgentSpeaking={voice.isAgentSpeaking} />
       <div className="mx-auto flex h-full w-full max-w-md flex-col overflow-hidden bg-[#f7f1e5] shadow-[8px_0_0_rgba(82,30,39,0.08)]">
         <header className="safe-top flex shrink-0 items-center justify-between px-5 pb-2 pt-3">
           <div className="flex min-w-0 items-center gap-2.5">
@@ -411,16 +288,6 @@ export default function HomePage() {
             error={locationError}
             onRetry={requestLocation}
           />
-          {/* <TravelPlanCard
-            questName={questName}
-            locationLabel={locationLabel}
-            profile={voice.profile}
-            places={questPlaces}
-            quests={quests}
-            isLoadingPlaces={isLoadingPlaces}
-            placesError={placesError}
-          /> */}
-
           <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border-2 border-[#c7ac84] bg-[#fffaf0] shadow-soft">
             <div className="flex shrink-0 items-center justify-between border-b border-[#dfceb1] px-4 py-2.5">
               <div className="min-w-0">
