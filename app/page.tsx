@@ -13,7 +13,7 @@ import { useLocation } from "@/hooks/useLocation";
 import { useRecorder } from "@/hooks/useRecorder";
 import { createAssistantMessage, INITIAL_MESSAGES } from "@/lib/mock-ai";
 import { createId } from "@/lib/utils";
-import type { Message } from "@/types/message";
+import type { LocationCoordinates, Message } from "@/types/message";
 
 type QuestScreen = "welcome" | "setup" | "reveal" | "main";
 
@@ -28,15 +28,16 @@ const QUEST_NAMES = ["The Serendipity Stroll", "The Tiny Grand Tour", "The Sidew
 
 export default function HomePage() {
   const [screen, setScreen] = useState<QuestScreen>("welcome");
-  const [setupStep, setSetupStep] = useState(0);
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [isTyping, setIsTyping] = useState(false);
   const [questName, setQuestName] = useState("The Little Detour");
   const [locationLabel, setLocationLabel] = useState("");
+  const [selectedLocation, setSelectedLocation] = useState<LocationCoordinates | null>(null);
+  const [isUsingCurrentLocation, setIsUsingCurrentLocation] = useState(false);
   const timeoutIdsRef = useRef<number[]>([]);
   const revealTimeoutRef = useRef<number | null>(null);
   const { location, status: locationStatus, error: locationError, requestLocation } = useLocation(
-    screen === "main" || (screen === "setup" && setupStep === 1),
+    screen === "main" || screen === "setup",
   );
   const {
     status: recorderStatus,
@@ -119,6 +120,13 @@ export default function HomePage() {
   }, [addUserMessage, clearRecording, durationSeconds, recordingBlob]);
 
   useEffect(() => {
+    if (isUsingCurrentLocation && location) {
+      setSelectedLocation(location);
+      setLocationLabel("Current location");
+    }
+  }, [isUsingCurrentLocation, location]);
+
+  useEffect(() => {
     return () => {
       clearPendingTimeouts();
       if (revealTimeoutRef.current !== null) {
@@ -131,7 +139,8 @@ export default function HomePage() {
     setMessages(INITIAL_MESSAGES);
     setQuestName("The Little Detour");
     setLocationLabel("");
-    setSetupStep(0);
+    setSelectedLocation(null);
+    setIsUsingCurrentLocation(false);
     setScreen("setup");
   };
 
@@ -157,16 +166,18 @@ export default function HomePage() {
   };
 
   const handleSetupBack = () => {
-    if (setupStep === 1) {
-      setSetupStep(0);
-      return;
-    }
     setScreen("welcome");
   };
 
   const handleUseCurrentLocation = () => {
+    setIsUsingCurrentLocation(true);
     requestLocation();
-    setLocationLabel("Current location");
+  };
+
+  const handlePlaceSelect = (label: string, coordinates: LocationCoordinates) => {
+    setIsUsingCurrentLocation(false);
+    setLocationLabel(label);
+    setSelectedLocation(coordinates);
   };
 
   const handleCreateQuest = () => {
@@ -209,14 +220,14 @@ export default function HomePage() {
   if (screen === "setup") {
     return (
       <QuestSetup
-        step={setupStep}
         location={location}
         locationStatus={locationStatus}
         locationError={locationError}
         locationLabel={locationLabel}
-        onLocationLabelChange={setLocationLabel}
+        selectedLocation={selectedLocation}
+        isUsingCurrentLocation={isUsingCurrentLocation}
+        onPlaceSelect={handlePlaceSelect}
         onUseCurrentLocation={handleUseCurrentLocation}
-        onNext={() => setSetupStep(1)}
         onBack={handleSetupBack}
         onCreateQuest={handleCreateQuest}
       />
