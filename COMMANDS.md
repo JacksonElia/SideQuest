@@ -44,6 +44,7 @@ npm run smoke -- 48.8584 2.2945
 | `POST /api/session` | Mints an OpenAI Realtime ephemeral client secret. Body: `{lat, lng, accuracy?}` |
 | `POST /api/query` | Nearby-places retrieval. Body: `{lat, lng, utterance, constraints?, place_id?}` |
 | `POST /api/tool` | Server-side execution of a model-issued tool call (currently only `findNearbyPlaces`). Body: `{name, call_id, arguments, lat, lng, accuracy?}`. Browser is the caller; Moss stays server-side. |
+| `POST /api/context` | Proactive Moss → Realtime retrieval. The browser fires this on every user turn with the just-finished transcript and the traveler's coordinates; the server returns a single voice-friendly prose line. Body: `{lat, lng, utterance}`. |
 
 ```bash
 curl -X POST http://localhost:3000/api/query \
@@ -72,6 +73,15 @@ the browser POSTs the arguments to `/api/tool`; the server runs the lookup
 against Moss, returns the result, and the browser feeds it back as a
 `function_call_output` conversation item.
 
+On every user turn the browser also fires `POST /api/context` with the
+finished transcript. The server hits the same `query()` path the tool uses,
+summarizes the result into one short prose line (`lib/server/context-summary.ts`),
+and the browser appends it to the conversation as a user-role item with a
+"[Updated background context, not a question from the traveler]" prefix.
+Net effect: the model has the lay of the land around the traveler before its
+NEXT response, so the proactive retrieval feeds context back into the
+Realtime session without waiting for the model to call the tool.
+
 Location reaches the guide once at session start (seeded into the session mint)
 and can be re-sent on every tool call by the browser. The browser is the
 single source of truth for coordinates during a session.
@@ -96,6 +106,7 @@ npm run smoke
 | Realtime tool schema (function definitions) | `lib/server/realtime-tools.ts` |
 | System prompt / persona | `lib/server/prompt.ts` |
 | Tool execution (server-side Moss lookup) | `app/api/tool/route.ts` |
+| Proactive Moss → Realtime context | `app/api/context/route.ts`, `lib/server/context-summary.ts` |
 | Browser WebRTC + data channel | `hooks/useVoiceSession.ts` |
 
 ## Notes

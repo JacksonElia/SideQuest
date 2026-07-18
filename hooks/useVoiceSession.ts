@@ -102,6 +102,18 @@ interface ToolCallResponse {
   output: Record<string, unknown>;
 }
 
+interface ContextFetchResponse {
+  summary?: string;
+  latencyMs?: number;
+  error?: string;
+}
+
+/**
+ * Per-transcript cache so a transcript that already produced a context summary
+ * doesn't trigger a duplicate fetch. Cleared when the hook unmounts.
+ */
+const lastContextByTranscript = new Map<string, string>();
+
 const REALTIME_CALLS_URL = "https://api.openai.com/v1/realtime/calls";
 const DATA_CHANNEL_LABEL = "oai-events";
 
@@ -264,6 +276,65 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
   }, []);
 
   /**
+   * Proactive Moss → Realtime context injection.
+   *
+   * The browser is the moment the server-side VAD commits the user's audio.
+   * Rather than wait for the model to call `findNearbyPlaces`, we fire a
+   * retrieval with the just-finished utterance and drop the short summary
+   * into the conversation as a user-role item tagged as background context.
+   * The model then has the lay of the land for its NEXT response (the
+   * current response is typically already in flight by the time the fetch
+   * lands — that's fine, the next turn is what benefits).
+   *
+   * Fire-and-forget: a slow or failing /api/context never blocks the voice
+   * path. The model just lacks the proactive hint, exactly as it would
+   * without this code.
+   */
+  const enqueueContextUpdate = useCallback(
+    (utterance: string) => {
+      const fix = currentLocationRef.current;
+      if (!fix) return;
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+
+      void (async () => {
+        try {
+          const response = await fetch("/api/context", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              lat: fix.lat,
+              lng: fix.lng,
+              utterance: utterance.slice(0, 500),
+            }),
+            signal: controller.signal,
+          });
+          if (!response.ok) return;
+          const payload = (await response.json()) as ContextFetchResponse;
+          const summary = payload.summary;
+          if (typeof summary !== "string" || summary.length === 0) return;
+          if (lastContextByTranscript.get(utterance) === summary) return;
+          lastContextByTranscript.set(utterance, summary);
+          sendOnDataChannel({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: summary }],
+            },
+          });
+        } catch {
+          // Swallow — context fetch is best-effort.
+        } finally {
+          clearTimeout(timer);
+        }
+      })();
+    },
+    [sendOnDataChannel],
+  );
+
+  /**
    * Execute a tool call the model emitted.
    *
    * The browser can't safely call Moss (no server-side index, no fail-soft
@@ -365,13 +436,15 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
         case "conversation.item.input_audio_transcription.completed": {
           const transcript = event.transcript;
           if (typeof transcript === "string" && transcript.trim()) {
+            const trimmed = transcript.trim();
             upsertMessage({
               id: `user-${String(event.item_id ?? Date.now())}`,
               role: "user",
               kind: "text",
-              text: transcript.trim(),
+              text: trimmed,
               createdAt: new Date().toISOString(),
             });
+            enqueueContextUpdate(trimmed);
           }
           break;
         }
@@ -421,7 +494,13 @@ export function useVoiceSession(location: LocationCoordinates | null): UseVoiceS
           break;
       }
     },
-    [executeToolCall, patchDiagnostics, updateAssistantTranscript, upsertMessage],
+    [
+      executeToolCall,
+      enqueueContextUpdate,
+      patchDiagnostics,
+      updateAssistantTranscript,
+      upsertMessage,
+    ],
   );
 
   const connect = useCallback(async () => {
