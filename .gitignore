@@ -16,6 +16,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Moss downloads the index and its embedding model here on first query.
+.moss-cache/
+
 # OS / editor
 .DS_Store
 Thumbs.db
