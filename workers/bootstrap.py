@@ -14,7 +14,10 @@ from lib.store import Store
 
 
 INDEX_NAME = "sidequest-places"
-WIKIPEDIA_SUMMARY_URL = "https://en.wikipedia.org/api/rest_v1/page/summary/{}"
+WIKIPEDIA_EXTRACT_URL = (
+    "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1"
+    "&format=json&redirects=1&titles={}"
+)
 CHUNK_SIZE_TOKENS = 300
 LANDMARKS_PATH = Path(__file__).resolve().parents[1] / "data" / "landmarks.json"
 
@@ -61,17 +64,20 @@ def main() -> int:
     with httpx.Client(
         timeout=15.0,
         follow_redirects=True,
-        headers={"User-Agent": "SideQuest/1.0 (local tour-guide bootstrap)"},
+        headers={"User-Agent": "SideQuest/1.0 (hackathon project; contact: dongm5858@gmail.com)"},
     ) as client:
         for place in places:
             try:
-                response = client.get(WIKIPEDIA_SUMMARY_URL.format(quote(place["name"], safe="")))
+                response = client.get(WIKIPEDIA_EXTRACT_URL.format(quote(place["name"], safe="")))
                 if response.status_code == httpx.codes.NOT_FOUND:
                     print(f"{place['place_id']}: skipped (Wikipedia page not found)")
                     continue
                 response.raise_for_status()
 
-                extract = response.json().get("extract", "").strip()
+                pages = response.json().get("query", {}).get("pages", {})
+                extract = next(
+                    (page.get("extract", "") for page in pages.values()), ""
+                ).strip()
                 chunks = _chunk_text(extract)
                 if not chunks:
                     print(f"{place['place_id']}: skipped (Wikipedia extract was empty)")
