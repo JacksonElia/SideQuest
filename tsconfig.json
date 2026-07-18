@@ -9,6 +9,10 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Server modules import each other with explicit .ts extensions so the same
+    // files run unbundled under `node --test`, which has no extension guessing.
+    // The bundler resolves the exact path fine, so both paths agree.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",

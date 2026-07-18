@@ -2,17 +2,28 @@
   "name": "sidequest",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "node --env-file-if-exists=.env.local --test \"test/*.test.ts\"",
+    "bootstrap": "node --env-file=.env.local scripts/bootstrap.ts",
+    "fixtures": "node --env-file=.env.local scripts/run-fixtures.ts",
+    "smoke": "node --env-file=.env.local scripts/smoke.ts",
+    "llm:smoke": "node --env-file=.env.local scripts/llm-smoke.ts",
+    "moss:smoke": "node --env-file=.env.local scripts/moss-smoke.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.12",
+    "livekit-client": "^2.20.1",
+    "livekit-server-sdk": "2.17.0",
     "lucide-react": "^0.468.0",
     "next": "^15.4.6",
     "react": "^19.1.1",
