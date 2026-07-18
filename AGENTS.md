@@ -49,12 +49,14 @@ Unusual: (1) There is NO database — Moss indexes are the only datastore; metad
 ## Frontend currently implemented
 
 - The frontend is a mobile-first Next.js App Router experience in `app/`, with reusable UI grouped under `components/`, browser capability hooks under `hooks/`, typed messages under `types/`, and mock adapters under `lib/`.
-- The home screen is intentionally voice-first. The typed composer and bottom action toolbar are removed; the conversation card shows the user/AI message history and a large “Tap to speak” control.
-- `hooks/useLocation.ts` requests permission on load and continuously tracks arbitrary device coordinates with `navigator.geolocation.watchPosition()`. It exposes latitude, longitude, accuracy, permission state, retry behavior, and friendly errors. Do not replace this with a fixed location.
+- The app opens into a Spotify Wrapped-inspired Quest entry experience in `components/Quest/`: users can start a new Quest, continue a saved Journey, move through the future-chatbot setup shell, choose current/manual location, see a timed Quest reveal, and then enter the guide.
+- The Quest entry screen appears every time the app opens. `localStorage` stores the current Quest name, starting location label, and serializable conversation state under `sidequest-journey`; this is intentionally a frontend-only resume path.
+- The main guide remains intentionally voice-first. The typed composer, bottom action toolbar, and camera button are removed; the conversation card shows the user/AI message history and a large “Tap to speak” control.
+- `hooks/useLocation.ts` tracks arbitrary device coordinates with `navigator.geolocation.watchPosition()` when the setup location step or main guide is active. It exposes latitude, longitude, accuracy, permission state, retry behavior, and friendly errors. Do not replace this with a fixed location.
 - `hooks/useRecorder.ts` requests microphone access, records with `MediaRecorder`, exposes listening/processing/denied/error states and a timer, and keeps the captured audio blob local. Audio is never uploaded.
 - `components/Map/MapCard.tsx` is a polished placeholder map surface that consumes live location state. It has a TODO for replacing the decorative surface with a maps provider.
-- `components/Plan/TravelPlanCard.tsx` summarizes the current mock itinerary between the live map and conversation. It is presentation-only for now and should become driven by the future retrieval/planning response.
-- `components/Camera/CameraButton.tsx` lives beside the voice control in the conversation footer. It supports camera permission, take-photo and library selection, then keeps image previews local in chat via object URLs. Images are never uploaded.
+- `components/Plan/TravelPlanCard.tsx` summarizes the current Quest itinerary between the live map and conversation. It is presentation-only for now and should become driven by the future retrieval/planning response.
+- `components/Camera/CameraButton.tsx` is retained as an unused future media component, but no camera control is currently exposed in the product UI.
 - `components/Chat/` renders animated text, image, and voice placeholder messages plus the typing indicator. The voice-first UI does not expose a text-entry path.
 - `lib/mock-ai.ts` supplies the initial welcome message and fixed delayed assistant response. It contains a TODO for replacing the mock adapter with the future AI conversation service.
 - There are no API routes or backend functions in this frontend. Future AI, scraping, Moss retrieval, maps, authentication, and itinerary services should be wired behind typed adapters without moving secrets into client code.

@@ -23,7 +23,12 @@ const stops = [
   },
 ];
 
-export function TravelPlanCard() {
+interface TravelPlanCardProps {
+  questName: string;
+  locationLabel: string;
+}
+
+export function TravelPlanCard({ questName, locationLabel }: TravelPlanCardProps) {
   return (
     <section className="relative mt-4 overflow-visible rounded-[28px] border border-blue-100 bg-gradient-to-br from-blue-50 via-white to-indigo-50 p-5 shadow-soft">
       <div className="flex items-start justify-between gap-4">
@@ -36,7 +41,7 @@ export function TravelPlanCard() {
               Your travel plan
             </p>
             <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
-              A gentle local loop
+              {questName}
             </h2>
           </div>
         </div>
@@ -72,7 +77,7 @@ export function TravelPlanCard() {
       </div>
 
       <div className="mt-4 flex items-center justify-between border-t border-blue-100/80 pt-3 text-[11px] font-semibold text-blue-600">
-        <span>We’ll adjust this as you talk</span>
+        <span>{locationLabel || "Your current area"} · We’ll adjust this as you talk</span>
         <ChevronRight className="size-4" />
       </div>
     </section>
