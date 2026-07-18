@@ -17,26 +17,6 @@ export interface OpenAIConfig {
 const DEFAULT_MODEL = 'gpt-realtime';
 const DEFAULT_VOICE = 'alloy';
 
-/**
- * Read an env var, accepting a legacy/misspelled alias with a loud warning.
- * The alias support is a hackathon concession — fix the .env, don't rely on it.
- */
-function readWithAlias(canonical: string, aliases: string[] = []): string | undefined {
-  const direct = process.env[canonical];
-  if (direct) return direct;
-
-  for (const alias of aliases) {
-    if (process.env[alias]) {
-      console.warn(
-        `[config] WARNING: using ${alias} as a fallback for ${canonical}. ` +
-          `Rename it in .env.local — the alias is not supported by the OpenAI SDK itself.`,
-      );
-      return process.env[alias];
-    }
-  }
-  return undefined;
-}
-
 export function loadOpenAIConfig(): OpenAIConfig {
   const cfg: OpenAIConfig = {
     apiKey: process.env.OPENAI_API_KEY ?? '',
