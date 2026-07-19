@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Home, MapPin, ScrollText } from "lucide-react";
-import { ChatInput } from "@/components/Chat/ChatInput";
 import { ChatWindow } from "@/components/Chat/ChatWindow";
 import { MapCard } from "@/components/Map/MapCard";
 import { TravelPlanCard, type QuestPlace } from "@/components/Plan/TravelPlanCard";
 import { QuestScoping } from "@/components/Quest/QuestScoping";
 import { QuestSetup } from "@/components/Quest/QuestSetup";
 import { QuestWelcome } from "@/components/Quest/QuestWelcome";
+import { VoiceButton } from "@/components/Voice/VoiceButton";
 import { useLocation } from "@/hooks/useLocation";
+import { useVoiceSession } from "@/hooks/useVoiceSession";
 import { createId } from "@/lib/utils";
 import type { LocationCoordinates, Message, TravelProfile } from "@/types/message";
 
@@ -26,11 +27,6 @@ interface SavedJourney {
 interface QuestPlanResponse {
   queries?: unknown;
   places?: unknown;
-  error?: unknown;
-}
-
-interface GuideAnswerResponse {
-  answer?: unknown;
   error?: unknown;
 }
 
@@ -110,6 +106,7 @@ export default function HomePage() {
     error: locationError,
     requestLocation,
   } = useLocation(screen === "setup" || screen === "scoping" || screen === "main");
+  const voice = useVoiceSession(selectedLocation ?? location);
 
   const persistJourney = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -239,47 +236,6 @@ export default function HomePage() {
     }
   };
 
-  const handleGuideMessage = async (text: string) => {
-    const fix = selectedLocation ?? location;
-    setMessages((current) => [...current, textMessage("user", text)]);
-    if (!fix) {
-      setMessages((current) => [
-        ...current,
-        textMessage("assistant", "Choose a location first so I can search Moss nearby."),
-      ]);
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/guide-answer", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ lat: fix.latitude, lng: fix.longitude, question: text }),
-      });
-      const result = (await response.json()) as GuideAnswerResponse;
-      if (!response.ok) {
-        throw new Error(typeof result.error === "string" ? result.error : "Guide search failed.");
-      }
-      setMessages((current) => [
-        ...current,
-        textMessage(
-          "assistant",
-          typeof result.answer === "string" && result.answer.trim()
-            ? result.answer
-            : "I could not find an answer for that area question.",
-        ),
-      ]);
-    } catch (error) {
-      setMessages((current) => [
-        ...current,
-        textMessage(
-          "assistant",
-          error instanceof Error ? error.message : "Moss search is unavailable right now.",
-        ),
-      ]);
-    }
-  };
-
   if (screen === "welcome") {
     return (
       <QuestWelcome
@@ -339,12 +295,19 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 rounded-sm border border-[#c7ac84] bg-[#fffaf0] px-3 py-2 text-xs font-semibold text-[#5c252b] shadow-sm">
-              <span className="size-1.5 rounded-full bg-[#4b7f52]" />
-              Text guide
+              <span
+                className={`size-1.5 rounded-full ${
+                  voice.status === "connected" ? "bg-[#4b7f52]" : "bg-[#c67c2e]"
+                }`}
+              />
+              {voice.status === "connected" ? "Guide live" : "Voice guide"}
             </div>
             <button
               type="button"
-              onClick={() => setScreen("welcome")}
+              onClick={() => {
+                void voice.disconnect();
+                setScreen("welcome");
+              }}
               className="flex size-9 items-center justify-center rounded-lg border border-[#c7ac84] bg-[#fffaf0] text-[#7a4c4d] shadow-sm transition hover:bg-[#eadfca] hover:text-[#31101b] active:scale-95"
               aria-label="Return to start"
               title="Return to start"
@@ -371,7 +334,7 @@ export default function HomePage() {
             <div className="flex shrink-0 items-center justify-between border-b border-[#dfceb1] px-4 py-2.5">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8c6a5f]">
-                  Moss search
+                  Voice guide
                 </p>
                 <h2 className="text-sm font-semibold tracking-tight text-[#31101b]">
                   Ask about the area
@@ -381,9 +344,20 @@ export default function HomePage() {
                 <MapPin className="size-4" />
               </div>
             </div>
-            <ChatWindow messages={messages} isTyping={false} />
-            <div className="shrink-0 border-t border-[#dfceb1] bg-[#fffaf0] px-4 py-3">
-              <ChatInput placeholder="Search nearby places..." onSend={handleGuideMessage} />
+            <ChatWindow
+              messages={[...messages, ...voice.messages]}
+              isTyping={voice.isAgentSpeaking}
+            />
+            <div className="flex shrink-0 justify-center border-t border-[#dfceb1] bg-[#fffaf0] px-4 py-3">
+              <VoiceButton
+                variant="conversation"
+                status={voice.status}
+                isMuted={voice.isMuted}
+                isAgentSpeaking={voice.isAgentSpeaking}
+                error={voice.error}
+                onConnect={() => void voice.connect()}
+                onToggleMute={() => void voice.toggleMute()}
+              />
             </div>
           </section>
         </div>

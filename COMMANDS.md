@@ -8,7 +8,7 @@ npm install
 npm run dev
 ```
 
-`npm run dev` starts the text-only Next.js experience at `http://localhost:3000`.
+`npm run dev` starts SideQuest at `http://localhost:3000`.
 
 | Command              | What it does                                                          |
 | -------------------- | --------------------------------------------------------------------- |
@@ -29,6 +29,9 @@ npm run dev
 | `POST /api/quest-plan`   | Generates three OpenRouter query strings from the typed profile and runs them against Moss. |
 | `POST /api/query`        | Retrieves nearby places from Moss.                                                          |
 | `POST /api/guide-answer` | Retrieves nearby Moss records and uses OpenRouter to answer the typed guide question.       |
+| `POST /api/session`      | Mints an OpenAI Realtime client secret for the voice guide.                                 |
+| `POST /api/tool`         | Runs the voice guide's `findNearbyPlaces` retrieval tool server-side.                       |
+| `POST /api/context`      | Adds proactive nearby-place context to the voice conversation.                              |
 
 The first Moss request on a cold process can download the index and embedding model. Later requests reuse the loaded index.
 
@@ -37,3 +40,6 @@ The first Moss request on a cold process can download the index and embedding mo
 The current Moss native binding requires a newer GLIBC version than Vercel provides. Set
 `STORE_BACKEND=fake` (or leave it unset) for Vercel deployments. The guide and OpenRouter
 features work with the built-in landmark records; real Moss retrieval must run on a compatible host.
+
+The voice guide also requires `OPENAI_API_KEY`. Set `OPENAI_REALTIME_MODEL` and
+`OPENAI_REALTIME_VOICE` only to override their defaults.
