@@ -76,7 +76,12 @@ export function buildSessionUpdate(
     type: 'session.update',
     session: {
       instructions,
-      audio: { output: { voice: cfg.voice } },
+      audio: {
+        input: {
+          transcription: { model: 'whisper-1' },
+        },
+        output: { voice: cfg.voice },
+      },
       tools,
       tool_choice: 'auto',
       // Server-side VAD handles end-of-utterance detection. No local VAD
